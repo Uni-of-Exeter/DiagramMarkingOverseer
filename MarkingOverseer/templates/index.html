@@ -215,7 +215,7 @@ table.matrix tr:hover td{background:#161625}
       <!-- Step 3 -->
       <div class="card">
         <div class="card-title">Step 3 — Extract TA Marks (optional)</div>
-        <p class="muted" style="margin-bottom:12px">Looks for handwritten P/F marks from teaching assistants on both header and body scans.</p>
+        <p class="muted" style="margin-bottom:12px">Reads header scans for handwritten P/F marks from teaching assistants. If Marked Scans Root is set in Config, those scans are used instead (original red layer intact).</p>
         <div class="row">
           <select class="input" id="j3-questions" style="max-width:200px">
             <option value="">All questions</option>
@@ -320,6 +320,10 @@ table.matrix tr:hover td{background:#161625}
     <div class="field">
       <label>Answer Sheets Root (optional — overrides body/ as answer PDF source)</label>
       <input class="input" id="cfg-answer-sheets-root" placeholder="/path/to/answer-sheets">
+    </div>
+    <div class="field">
+      <label>Marked Scans Root (optional — same structure as Data Root but with TA marks visible)</label>
+      <input class="input" id="cfg-marked-scans-root" placeholder="/path/to/marked-scans">
     </div>
 
     <hr class="divider">

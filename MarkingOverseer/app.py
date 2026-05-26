@@ -52,6 +52,7 @@ _CONFIG_PATH = Path(__file__).parent / "config.json"
 _DEFAULTS: dict = {
     "data_root": os.environ.get("OVERSEER_DATA_ROOT", ""),
     "answer_sheets_root": "",
+    "marked_scans_root": "",
     "aws_profile": "IncubatorDevOps",
     "aws_region": "eu-north-1",
     "anthropic_api_key": "",
@@ -616,52 +617,48 @@ def api_extract_human_marks():
 
     data = request.json or {}
     questions = data.get("questions") or store.list_questions(dr)
-    all_items = []
-    for q in questions:
-        for pdf in sorted((Path(dr) / "body" / q).glob("body_scan_*.pdf")):
-            all_items.append(("body", q, pdf))
-        for pdf in sorted((Path(dr) / "header" / q).glob("header_scan_*.pdf")):
-            all_items.append(("header", q, pdf))
+    marked_root = cfg.get("marked_scans_root", "")
+    all_pdfs = [
+        (q, p)
+        for q in questions
+        for p in sorted((Path(dr) / "header" / q).glob("header_scan_*.pdf"))
+    ]
 
-    jid = _new_job("extract_human_marks", len(all_items))
-    _job_log(jid, f"Extracting TA marks from {len(all_items)} PDFs")
+    jid = _new_job("extract_human_marks", len(all_pdfs))
+    _job_log(jid, f"Extracting TA marks from {len(all_pdfs)} header PDFs"
+             + (f" (using marked scans from {marked_root})" if marked_root else ""))
     prompts = cfg.get("prompts", {})
 
     def worker(item):
         if _is_cancelled(jid):
             return
-        side, q, pdf_path = item
-        prefix = f"{side}_scan_"
-        fid = pdf_path.stem[len(prefix):]
-        _job_log(jid, f"  → {side}/{pdf_path.name}")
+        q, pdf_path = item
+        fid = pdf_path.stem[len("header_scan_"):]
+        _job_log(jid, f"  → {pdf_path.name}")
         try:
-            if side == "body":
-                result = scanner.extract_human_mark_body(
-                    pdf_path.read_bytes(),
-                    provider=cfg["extraction_provider"], model=cfg["extraction_model"],
-                    aws_profile=cfg.get("aws_profile"), aws_region=cfg.get("aws_region", "eu-north-1"),
-                    anthropic_api_key=cfg.get("anthropic_api_key"),
-                    prompt=prompts.get("body_mark") or None,
-                )
-                store.upsert_scan_field(dr, "body", q, fid, {"human_mark_body": result["mark"]})
+            # Prefer marked scan (red layer intact) if configured and present
+            if marked_root:
+                marked_path = Path(marked_root) / "header" / q / pdf_path.name
+                pdf_bytes = marked_path.read_bytes() if marked_path.exists() else pdf_path.read_bytes()
             else:
-                result = scanner.extract_human_mark_header(
-                    pdf_path.read_bytes(),
-                    provider=cfg["extraction_provider"], model=cfg["extraction_model"],
-                    aws_profile=cfg.get("aws_profile"), aws_region=cfg.get("aws_region", "eu-north-1"),
-                    anthropic_api_key=cfg.get("anthropic_api_key"),
-                    prompt=prompts.get("header_mark") or None,
-                )
-                store.upsert_scan_field(dr, "header", q, fid, {"human_mark_header": result["mark"]})
-            _job_log(jid, f"  {side}/{pdf_path.name}: {result['mark']!r}")
+                pdf_bytes = pdf_path.read_bytes()
+            result = scanner.extract_human_mark_header(
+                pdf_bytes,
+                provider=cfg["extraction_provider"], model=cfg["extraction_model"],
+                aws_profile=cfg.get("aws_profile"), aws_region=cfg.get("aws_region", "eu-north-1"),
+                anthropic_api_key=cfg.get("anthropic_api_key"),
+                prompt=prompts.get("header_mark") or None,
+            )
+            store.upsert_scan_field(dr, "header", q, fid, {"human_mark_header": result["mark"]})
+            _job_log(jid, f"  {pdf_path.name}: {result['mark']!r}")
             _job_tick(jid)
         except Exception as e:
-            _job_log(jid, f"  ERROR {side}/{pdf_path.name}: {e}")
+            _job_log(jid, f"  ERROR {pdf_path.name}: {e}")
             _job_tick(jid, error=True)
 
     threading.Thread(
         target=_run_parallel,
-        args=(jid, all_items, worker, cfg.get("parallel_workers", 4)),
+        args=(jid, all_pdfs, worker, cfg.get("parallel_workers", 4)),
         daemon=True,
     ).start()
     return jsonify({"job_id": jid})

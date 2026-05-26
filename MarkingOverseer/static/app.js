@@ -583,6 +583,7 @@ async function openConfig() {
     state.promptDefaults = defs;
     document.getElementById('cfg-data-root').value = cfg.data_root || '';
     document.getElementById('cfg-answer-sheets-root').value = cfg.answer_sheets_root || '';
+    document.getElementById('cfg-marked-scans-root').value = cfg.marked_scans_root || '';
     document.getElementById('cfg-aws-profile').value = cfg.aws_profile || '';
     document.getElementById('cfg-aws-region').value = cfg.aws_region || '';
     document.getElementById('cfg-anthropic-key').value = cfg.anthropic_api_key || '';
@@ -661,6 +662,7 @@ async function saveConfig() {
   const cfg = {
     data_root: document.getElementById('cfg-data-root').value.trim(),
     answer_sheets_root: document.getElementById('cfg-answer-sheets-root').value.trim(),
+    marked_scans_root: document.getElementById('cfg-marked-scans-root').value.trim(),
     aws_profile: document.getElementById('cfg-aws-profile').value.trim(),
     aws_region: document.getElementById('cfg-aws-region').value.trim(),
     anthropic_api_key: document.getElementById('cfg-anthropic-key').value.trim() || '***',
