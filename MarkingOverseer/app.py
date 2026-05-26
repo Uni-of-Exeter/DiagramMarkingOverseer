@@ -66,6 +66,16 @@ _DEFAULTS: dict = {
     "parallel_workers": 4,
     "render_dpi": 150,
     "skip_existing": True,
+    "prompts": {
+        "student_id": "",
+        "header_mark": "",
+        "qid": "",
+        "body_mark": "",
+        "oneshot": "",
+        "twostep_extract": "",
+        "twostep_mark": "",
+        "answer_sheet_extract": "",
+    },
 }
 
 
@@ -73,10 +83,12 @@ def load_config() -> dict:
     if _CONFIG_PATH.exists():
         try:
             saved = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-            return {**_DEFAULTS, **saved}
+            cfg = {**_DEFAULTS, **saved}
+            cfg["prompts"] = {**_DEFAULTS["prompts"], **saved.get("prompts", {})}
+            return cfg
         except Exception:
             pass
-    return dict(_DEFAULTS)
+    return {**_DEFAULTS, "prompts": dict(_DEFAULTS["prompts"])}
 
 
 def save_config(cfg: dict) -> None:
@@ -483,6 +495,7 @@ def api_extract_headers():
 
     jid = _new_job("extract_headers", len(all_pdfs))
     _job_log(jid, f"Extracting student IDs from {len(all_pdfs)} header PDFs")
+    prompts = cfg.get("prompts", {})
 
     def worker(item):
         if _is_cancelled(jid):
@@ -498,6 +511,7 @@ def api_extract_headers():
                 aws_profile=cfg.get("aws_profile"),
                 aws_region=cfg.get("aws_region", "eu-north-1"),
                 anthropic_api_key=cfg.get("anthropic_api_key"),
+                prompt=prompts.get("student_id") or None,
             )
             store.upsert_scan_field(dr, "header", q, fid, {
                 "StudentID": result.get("StudentID"),
@@ -542,6 +556,7 @@ def api_extract_bodies():
 
     jid = _new_job("extract_bodies", len(all_pdfs))
     _job_log(jid, f"Extracting QIDs from {len(all_pdfs)} body PDFs")
+    prompts = cfg.get("prompts", {})
 
     def worker(item):
         if _is_cancelled(jid):
@@ -557,6 +572,7 @@ def api_extract_bodies():
                 aws_profile=cfg.get("aws_profile"),
                 aws_region=cfg.get("aws_region", "eu-north-1"),
                 anthropic_api_key=cfg.get("anthropic_api_key"),
+                prompt=prompts.get("qid") or None,
             )
             if result["question_id"]:
                 store.upsert_scan_field(dr, "body", q, fid, {"QuestionID": result["question_id"]})
@@ -592,6 +608,7 @@ def api_extract_human_marks():
 
     jid = _new_job("extract_human_marks", len(all_items))
     _job_log(jid, f"Extracting TA marks from {len(all_items)} PDFs")
+    prompts = cfg.get("prompts", {})
 
     def worker(item):
         if _is_cancelled(jid):
@@ -607,6 +624,7 @@ def api_extract_human_marks():
                     provider=cfg["extraction_provider"], model=cfg["extraction_model"],
                     aws_profile=cfg.get("aws_profile"), aws_region=cfg.get("aws_region", "eu-north-1"),
                     anthropic_api_key=cfg.get("anthropic_api_key"),
+                    prompt=prompts.get("body_mark") or None,
                 )
                 store.upsert_scan_field(dr, "body", q, fid, {"human_mark_body": result["mark"]})
             else:
@@ -615,6 +633,7 @@ def api_extract_human_marks():
                     provider=cfg["extraction_provider"], model=cfg["extraction_model"],
                     aws_profile=cfg.get("aws_profile"), aws_region=cfg.get("aws_region", "eu-north-1"),
                     anthropic_api_key=cfg.get("anthropic_api_key"),
+                    prompt=prompts.get("header_mark") or None,
                 )
                 store.upsert_scan_field(dr, "header", q, fid, {"human_mark_header": result["mark"]})
             _job_log(jid, f"  {side}/{pdf_path.name}: {result['mark']!r}")
@@ -669,6 +688,7 @@ def api_ai_mark():
 
     jid = _new_job("ai_marking", len(work))
     _job_log(jid, f"AI marking: {len(work)} items ({len(approaches)} approaches × {len(model_cfgs)} models)")
+    prompts = cfg.get("prompts", {})
 
     def worker(item):
         if _is_cancelled(jid):
@@ -707,14 +727,25 @@ def api_ai_mark():
             )
 
             if approach == "oneshot":
-                result = scanner.ai_mark_oneshot(body_bytes, **kwargs)
+                result = scanner.ai_mark_oneshot(
+                    body_bytes, **kwargs,
+                    prompt=prompts.get("oneshot") or None,
+                )
             elif approach == "twostep":
-                result = scanner.ai_mark_twostep(body_bytes, **kwargs)
+                result = scanner.ai_mark_twostep(
+                    body_bytes, **kwargs,
+                    extract_prompt=prompts.get("twostep_extract") or None,
+                    mark_prompt=prompts.get("twostep_mark") or None,
+                )
             elif approach == "answer_sheet":
                 answer_path = store.get_answer_pdf(dr, question, qid, cfg.get("answer_sheets_root", ""))
                 if not answer_path:
                     raise FileNotFoundError(f"No answer PDF for QID {qid}")
-                result = scanner.ai_mark_answer_sheet(answer_path.read_bytes(), body_bytes, **kwargs)
+                result = scanner.ai_mark_answer_sheet(
+                    answer_path.read_bytes(), body_bytes, **kwargs,
+                    extract_prompt=prompts.get("answer_sheet_extract") or None,
+                    mark_prompt=prompts.get("twostep_mark") or None,
+                )
             else:
                 raise ValueError(f"Unknown approach: {approach!r}")
 

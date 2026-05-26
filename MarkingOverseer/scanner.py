@@ -283,10 +283,11 @@ def extract_student_identifier(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
+    prompt: str | None = None,
 ) -> dict:
     """Extract student identifier from a header PDF."""
     resp = _call(
-        messages=[{"role": "user", "content": [_pdf(header_pdf_bytes), _txt(_STUDENT_ID_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(header_pdf_bytes), _txt(prompt or _STUDENT_ID_PROMPT)]}],
         max_tokens=100,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -314,10 +315,11 @@ def extract_human_mark_header(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
+    prompt: str | None = None,
 ) -> dict:
     """Extract TA pass/fail mark from a header PDF."""
     resp = _call(
-        messages=[{"role": "user", "content": [_pdf(header_pdf_bytes), _txt(_HEADER_MARK_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(header_pdf_bytes), _txt(prompt or _HEADER_MARK_PROMPT)]}],
         max_tokens=20,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -384,10 +386,11 @@ def extract_question_id(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
+    prompt: str | None = None,
 ) -> dict:
     """Extract question ID from a body PDF (printed in the footer of the last page)."""
     resp = _call(
-        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(_QID_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(prompt or _QID_PROMPT)]}],
         max_tokens=80,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -407,10 +410,11 @@ def extract_human_mark_body(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
+    prompt: str | None = None,
 ) -> dict:
     """Extract TA pass/fail mark from a body PDF."""
     resp = _call(
-        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(_BODY_MARK_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(prompt or _BODY_MARK_PROMPT)]}],
         max_tokens=20,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -428,10 +432,11 @@ def ai_mark_oneshot(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
+    prompt: str | None = None,
 ) -> dict:
     """One call: worksheet containing the question and student work → pass/fail."""
     resp = _call(
-        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(_ONESHOT_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(prompt or _ONESHOT_PROMPT)]}],
         max_tokens=300,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -449,12 +454,14 @@ def ai_mark_twostep(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
+    extract_prompt: str | None = None,
+    mark_prompt: str | None = None,
 ) -> dict:
     """Two calls: derive correct answer from printed question, then mark student work."""
     body_doc = _pdf(body_pdf_bytes)
 
     step1 = _call(
-        messages=[{"role": "user", "content": [body_doc, _txt(_TWOSTEP_EXTRACT_PROMPT)]}],
+        messages=[{"role": "user", "content": [body_doc, _txt(extract_prompt or _TWOSTEP_EXTRACT_PROMPT)]}],
         max_tokens=600,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -464,7 +471,7 @@ def ai_mark_twostep(
     step2 = _call(
         messages=[{"role": "user", "content": [
             body_doc,
-            _txt(_TWOSTEP_MARK_PROMPT.format(correct_answer=correct_answer)),
+            _txt((mark_prompt or _TWOSTEP_MARK_PROMPT).format(correct_answer=correct_answer)),
         ]}],
         max_tokens=300,
         provider=provider, model=model,
@@ -488,10 +495,12 @@ def ai_mark_answer_sheet(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
+    extract_prompt: str | None = None,
+    mark_prompt: str | None = None,
 ) -> dict:
     """Two calls: extract correct answer from answer sheet PDF, then mark student work."""
     step1 = _call(
-        messages=[{"role": "user", "content": [_pdf(answer_pdf_bytes), _txt(_ANSWER_SHEET_EXTRACT_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(answer_pdf_bytes), _txt(extract_prompt or _ANSWER_SHEET_EXTRACT_PROMPT)]}],
         max_tokens=600,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -501,7 +510,7 @@ def ai_mark_answer_sheet(
     step2 = _call(
         messages=[{"role": "user", "content": [
             _pdf(body_pdf_bytes),
-            _txt(_TWOSTEP_MARK_PROMPT.format(correct_answer=correct_answer)),
+            _txt((mark_prompt or _TWOSTEP_MARK_PROMPT).format(correct_answer=correct_answer)),
         ]}],
         max_tokens=300,
         provider=provider, model=model,

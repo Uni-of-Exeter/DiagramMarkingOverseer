@@ -380,6 +380,45 @@ table.matrix tr:hover td{background:#161625}
     </div>
 
     <hr class="divider">
+    <details id="prompts-section">
+      <summary style="font-size:12px;color:#888;cursor:pointer;user-select:none;margin-bottom:4px">Prompts (advanced — leave blank to use built-in defaults)</summary>
+      <div style="margin-top:12px">
+        <div class="field">
+          <label>Student ID extraction</label>
+          <textarea class="input" id="cfg-prompt-student-id" rows="3" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="field">
+          <label>Header mark extraction</label>
+          <textarea class="input" id="cfg-prompt-header-mark" rows="3" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="field">
+          <label>Question ID extraction</label>
+          <textarea class="input" id="cfg-prompt-qid" rows="3" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="field">
+          <label>Body mark extraction</label>
+          <textarea class="input" id="cfg-prompt-body-mark" rows="3" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="field">
+          <label>One-shot marking</label>
+          <textarea class="input" id="cfg-prompt-oneshot" rows="4" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="field">
+          <label>Two-step: extract correct answer (from worksheet)</label>
+          <textarea class="input" id="cfg-prompt-twostep-extract" rows="4" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="field">
+          <label>Two-step / answer-sheet: mark student work <span class="muted">(must contain <code>{correct_answer}</code>)</span></label>
+          <textarea class="input" id="cfg-prompt-twostep-mark" rows="4" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="field">
+          <label>Answer-sheet: extract correct answer (from answer PDF)</label>
+          <textarea class="input" id="cfg-prompt-answer-sheet-extract" rows="4" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+      </div>
+    </details>
+
+    <hr class="divider">
     <div class="row" style="margin-bottom:8px">
       <p class="muted" style="font-size:12px">Error log (warnings &amp; errors from AI calls)</p>
       <div class="spacer"></div>
