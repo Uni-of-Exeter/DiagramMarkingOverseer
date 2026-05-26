@@ -471,7 +471,6 @@ def api_extract_headers():
                 aws_profile=cfg.get("aws_profile"),
                 aws_region=cfg.get("aws_region", "eu-north-1"),
                 anthropic_api_key=cfg.get("anthropic_api_key"),
-                dpi=cfg.get("render_dpi", 150),
             )
             store.upsert_scan_field(dr, "header", q, fid, {
                 "StudentID": result.get("StudentID"),
@@ -531,7 +530,6 @@ def api_extract_bodies():
                 aws_profile=cfg.get("aws_profile"),
                 aws_region=cfg.get("aws_region", "eu-north-1"),
                 anthropic_api_key=cfg.get("anthropic_api_key"),
-                dpi=cfg.get("render_dpi", 150),
             )
             if result["question_id"]:
                 store.upsert_scan_field(dr, "body", q, fid, {"QuestionID": result["question_id"]})
@@ -581,7 +579,7 @@ def api_extract_human_marks():
                     pdf_path.read_bytes(),
                     provider=cfg["extraction_provider"], model=cfg["extraction_model"],
                     aws_profile=cfg.get("aws_profile"), aws_region=cfg.get("aws_region", "eu-north-1"),
-                    anthropic_api_key=cfg.get("anthropic_api_key"), dpi=cfg.get("render_dpi", 150),
+                    anthropic_api_key=cfg.get("anthropic_api_key"),
                 )
                 store.upsert_scan_field(dr, "body", q, fid, {"human_mark_body": result["mark"]})
             else:
@@ -589,7 +587,7 @@ def api_extract_human_marks():
                     pdf_path.read_bytes(),
                     provider=cfg["extraction_provider"], model=cfg["extraction_model"],
                     aws_profile=cfg.get("aws_profile"), aws_region=cfg.get("aws_region", "eu-north-1"),
-                    anthropic_api_key=cfg.get("anthropic_api_key"), dpi=cfg.get("render_dpi", 150),
+                    anthropic_api_key=cfg.get("anthropic_api_key"),
                 )
                 store.upsert_scan_field(dr, "header", q, fid, {"human_mark_header": result["mark"]})
             _job_log(jid, f"  {side}/{pdf_path.name}: {result['mark']!r}")
@@ -679,7 +677,6 @@ def api_ai_mark():
                 aws_profile=cfg.get("aws_profile"),
                 aws_region=cfg.get("aws_region", "eu-north-1"),
                 anthropic_api_key=cfg.get("anthropic_api_key"),
-                dpi=cfg.get("render_dpi", 150),
             )
 
             if approach == "oneshot":

@@ -156,6 +156,10 @@ def _img(png: bytes) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _b64(png)}}
 
 
+def _pdf(data: bytes) -> dict:
+    return {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": _b64(data)}}
+
+
 def _txt(text: str) -> dict:
     return {"type": "text", "text": text}
 
@@ -266,12 +270,10 @@ def extract_student_identifier(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
-    dpi: int = 150,
 ) -> dict:
     """Extract student identifier from a header PDF."""
-    png = render_pdf_page(header_pdf_bytes, 0, dpi)
     resp = _call(
-        messages=[{"role": "user", "content": [_img(png), _txt(_STUDENT_ID_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(header_pdf_bytes), _txt(_STUDENT_ID_PROMPT)]}],
         max_tokens=100,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -299,12 +301,10 @@ def extract_human_mark_header(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
-    dpi: int = 150,
 ) -> dict:
     """Extract TA pass/fail mark from a header PDF."""
-    png = render_pdf_page(header_pdf_bytes, 0, dpi)
     resp = _call(
-        messages=[{"role": "user", "content": [_img(png), _txt(_HEADER_MARK_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(header_pdf_bytes), _txt(_HEADER_MARK_PROMPT)]}],
         max_tokens=20,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -321,7 +321,7 @@ def extract_human_mark_header(
 _QID_REGEX = re.compile(r"Q\d-[0-9a-f]{1,3}-[0-9a-f]{8}", re.IGNORECASE)
 
 _QID_PROMPT = (
-    "This student worksheet has a question ID printed at the bottom of the page. "
+    "This student worksheet has a question ID printed at the bottom of the last page. "
     "Return it as plain text only, no decoration. Example: Q2-3a-4bc12d34"
 )
 
@@ -342,7 +342,7 @@ _ONESHOT_PROMPT = (
 
 _TWOSTEP_EXTRACT_PROMPT = (
     "You are looking at a student's mathematics worksheet. "
-    "The printed question appears on this page. "
+    "The printed question appears on this document. "
     "Extract and describe the complete correct answer to the question, "
     "with all numerical values, algebraic expressions, steps, and notation "
     "needed to verify a student's response. Ignore the student's handwriting for now."
@@ -371,13 +371,10 @@ def extract_question_id(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
-    dpi: int = 150,
 ) -> dict:
-    """Extract question ID from the last page of a body PDF."""
-    n = pdf_page_count(body_pdf_bytes)
-    png = render_pdf_page(body_pdf_bytes, n - 1, dpi)
+    """Extract question ID from a body PDF (printed in the footer of the last page)."""
     resp = _call(
-        messages=[{"role": "user", "content": [_img(png), _txt(_QID_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(_QID_PROMPT)]}],
         max_tokens=80,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -397,12 +394,10 @@ def extract_human_mark_body(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
-    dpi: int = 150,
 ) -> dict:
     """Extract TA pass/fail mark from a body PDF."""
-    png = render_pdf_page(body_pdf_bytes, 0, dpi)
     resp = _call(
-        messages=[{"role": "user", "content": [_img(png), _txt(_BODY_MARK_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(_BODY_MARK_PROMPT)]}],
         max_tokens=20,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -420,12 +415,10 @@ def ai_mark_oneshot(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
-    dpi: int = 150,
 ) -> dict:
     """One call: worksheet containing the question and student work → pass/fail."""
-    body_png = render_pdf_page(body_pdf_bytes, 0, dpi)
     resp = _call(
-        messages=[{"role": "user", "content": [_img(body_png), _txt(_ONESHOT_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(_ONESHOT_PROMPT)]}],
         max_tokens=300,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -443,13 +436,12 @@ def ai_mark_twostep(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
-    dpi: int = 150,
 ) -> dict:
     """Two calls: derive correct answer from printed question, then mark student work."""
-    body_png = render_pdf_page(body_pdf_bytes, 0, dpi)
+    body_doc = _pdf(body_pdf_bytes)
 
     step1 = _call(
-        messages=[{"role": "user", "content": [_img(body_png), _txt(_TWOSTEP_EXTRACT_PROMPT)]}],
+        messages=[{"role": "user", "content": [body_doc, _txt(_TWOSTEP_EXTRACT_PROMPT)]}],
         max_tokens=600,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -458,7 +450,7 @@ def ai_mark_twostep(
 
     step2 = _call(
         messages=[{"role": "user", "content": [
-            _img(body_png),
+            body_doc,
             _txt(_TWOSTEP_MARK_PROMPT.format(correct_answer=correct_answer)),
         ]}],
         max_tokens=300,
@@ -483,14 +475,10 @@ def ai_mark_answer_sheet(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
-    dpi: int = 150,
 ) -> dict:
     """Two calls: extract correct answer from answer sheet PDF, then mark student work."""
-    answer_png = render_pdf_page(answer_pdf_bytes, 0, dpi)
-    body_png = render_pdf_page(body_pdf_bytes, 0, dpi)
-
     step1 = _call(
-        messages=[{"role": "user", "content": [_img(answer_png), _txt(_ANSWER_SHEET_EXTRACT_PROMPT)]}],
+        messages=[{"role": "user", "content": [_pdf(answer_pdf_bytes), _txt(_ANSWER_SHEET_EXTRACT_PROMPT)]}],
         max_tokens=600,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -499,7 +487,7 @@ def ai_mark_answer_sheet(
 
     step2 = _call(
         messages=[{"role": "user", "content": [
-            _img(body_png),
+            _pdf(body_pdf_bytes),
             _txt(_TWOSTEP_MARK_PROMPT.format(correct_answer=correct_answer)),
         ]}],
         max_tokens=300,
