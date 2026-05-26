@@ -188,7 +188,34 @@ def _call(
     return result
 
 
+def _to_converse_content(content: list[dict]) -> list[dict]:
+    """Translate Anthropic Messages-format content blocks to Bedrock Converse format."""
+    out = []
+    for block in content:
+        t = block.get("type")
+        if t == "text":
+            out.append({"text": block["text"]})
+        elif t == "image":
+            src = block["source"]
+            if src.get("type") == "base64":
+                raw = base64.standard_b64decode(src["data"])
+                fmt = src["media_type"].split("/")[-1]
+                out.append({"image": {"format": fmt, "source": {"bytes": raw}}})
+        elif t == "document":
+            src = block["source"]
+            if src.get("type") == "base64":
+                raw = base64.standard_b64decode(src["data"])
+                out.append({"document": {"format": "pdf", "name": "document", "source": {"bytes": raw}}})
+    return out
+
+
 def _bedrock(model, messages, max_tokens, profile, region):
+    # Anthropic models on Bedrock use the Anthropic Messages API via invoke_model.
+    # All other models (Nova, Titan, Llama, Mistral…) use the Converse API which
+    # handles format differences automatically — no recoding needed per model family.
+    if "anthropic" not in model.lower():
+        return _bedrock_converse(model, messages, max_tokens, profile, region)
+
     from botocore.exceptions import ClientError
 
     client = _bedrock_client(profile, region)
@@ -215,6 +242,44 @@ def _bedrock(model, messages, max_tokens, profile, region):
             raise
         except Exception as e:
             logger.error("Bedrock error [model=%s region=%s]: %s: %s", model, region, type(e).__name__, e)
+            raise
+
+
+def _bedrock_converse(model, messages, max_tokens, profile, region):
+    """Bedrock Converse API — model-agnostic path for Nova, Titan, Llama, Mistral, etc."""
+    from botocore.exceptions import ClientError
+
+    client = _bedrock_client(profile, region)
+    converse_messages = [
+        {"role": m["role"], "content": _to_converse_content(m["content"])}
+        for m in messages
+    ]
+    for attempt in range(3):
+        logger.info("Bedrock converse [model=%s region=%s attempt=%d max_tokens=%d]", model, region, attempt + 1, max_tokens)
+        try:
+            resp = client.converse(
+                modelId=model,
+                messages=converse_messages,
+                inferenceConfig={"maxTokens": max_tokens},
+            )
+            content = resp["output"]["message"]["content"]
+            text = next((b["text"] for b in content if "text" in b), "").strip()
+            usage = resp.get("usage", {})
+            in_tok = usage.get("inputTokens", 0)
+            out_tok = usage.get("outputTokens", 0)
+            logger.info("Bedrock converse ok [model=%s in=%d out=%d] response=%r", model, in_tok, out_tok, text[:200])
+            return {"text": text, "input_tokens": in_tok, "output_tokens": out_tok}
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            msg = e.response.get("Error", {}).get("Message", str(e))
+            if code in ("ThrottlingException", "ServiceUnavailableException") and attempt < 2:
+                logger.warning("Bedrock converse throttle [model=%s region=%s attempt=%d]: %s", model, region, attempt + 1, msg)
+                time.sleep(2 ** attempt)
+                continue
+            logger.error("Bedrock converse error [model=%s region=%s]: %s %s", model, region, code, msg)
+            raise
+        except Exception as e:
+            logger.error("Bedrock converse error [model=%s region=%s]: %s: %s", model, region, type(e).__name__, e)
             raise
 
 
