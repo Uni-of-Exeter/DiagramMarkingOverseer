@@ -12,6 +12,7 @@ let state = {
   reviewData: null,    // api response
   config: null,
   questions: window.INIT ? window.INIT.questions : [],
+  markingModels: [],   // [{provider, model, label, enabled}]
   jobPolls: {},        // prefix → intervalId
   jobIds: {},          // prefix → jid
 };
@@ -58,7 +59,7 @@ function showView(name) {
   if (name === 'matrix') loadMatrix();
   if (name === 'import') loadStudentList();
   if (name === 'stats') { loadStats(); loadAttemptDetail(); }
-  if (name === 'jobs') populateJobSelects();
+  if (name === 'jobs') { populateJobSelects(); loadMarkingModels(); }
   if (name === 'review') {
     if (!state.matrix) {
       loadMatrix().then(() => populateReviewSelects(state.reviewStudent, state.reviewQuestion));
@@ -393,6 +394,29 @@ function populateJobSelects() {
   if (fq) fq.innerHTML = opts;
 }
 
+async function loadMarkingModels() {
+  try {
+    const cfg = await api('GET', '/api/config');
+    state.markingModels = cfg.marking_models || [];
+    renderMarkingModelCheckboxes(state.markingModels);
+  } catch (_) {}
+}
+
+function renderMarkingModelCheckboxes(models) {
+  const list = document.getElementById('j4-models-list');
+  if (!list) return;
+  if (!models.length) {
+    list.innerHTML = '<span class="muted text-sm">No models configured — add models in Config</span>';
+    return;
+  }
+  list.innerHTML = models.map((m, i) =>
+    `<label class="row" style="gap:4px;cursor:pointer">
+      <input type="checkbox" id="j4-model-${i}" ${m.enabled !== false ? 'checked' : ''}>
+      <span class="text-sm">${esc(m.label || m.model)}</span>
+    </label>`
+  ).join('');
+}
+
 function _jobStarted(prefix, jid) {
   state.jobIds[prefix] = jid;
   const runBtn = document.getElementById(prefix + '-run');
@@ -439,9 +463,14 @@ async function runAiMark() {
   if (document.getElementById('a-answer_sheet').checked) approaches.push('answer_sheet');
   if (!approaches.length) { alert('Select at least one approach.'); return; }
 
+  const selectedModels = (state.markingModels || [])
+    .filter((m, i) => document.getElementById(`j4-model-${i}`)?.checked)
+    .map(m => m.model);
+  if (!selectedModels.length) { alert('Select at least one model.'); return; }
+
   const q = document.getElementById('j4-questions').value;
   const skip = document.getElementById('j4-skip').checked;
-  const body = { approaches, skip_existing: skip };
+  const body = { approaches, skip_existing: skip, models: selectedModels };
   if (q) body.questions = [q];
 
   try {
@@ -726,10 +755,12 @@ async function saveConfig() {
   };
   try {
     await api('POST', '/api/config', cfg);
-    // Reload question list
+    // Reload question list and marking models
     const qs = await api('GET', '/api/config/questions');
     state.questions = qs;
+    state.markingModels = cfg.marking_models || [];
     populateJobSelects();
+    renderMarkingModelCheckboxes(state.markingModels);
     closeConfig();
     if (state.currentView === 'matrix') loadMatrix();
   } catch (e) {
@@ -845,10 +876,15 @@ function esc(str) {
 
 (async function init() {
   try {
-    const qs = await api('GET', '/api/config/questions');
+    const [qs, cfg] = await Promise.all([
+      api('GET', '/api/config/questions'),
+      api('GET', '/api/config'),
+    ]);
     if (qs.length) state.questions = qs;
+    state.markingModels = cfg.marking_models || [];
   } catch (_) {}
   populateJobSelects();
+  renderMarkingModelCheckboxes(state.markingModels);
   populateReviewSelects(null, null);
 
   // Populate stats filter

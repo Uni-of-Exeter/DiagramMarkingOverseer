@@ -713,10 +713,13 @@ def api_ai_mark():
     questions = data.get("questions") or store.list_questions(dr)
     approaches = data.get("approaches", cfg.get("marking_approaches", ["oneshot"]))
     model_cfgs = [m for m in cfg.get("marking_models", []) if m.get("enabled", True)]
+    selected_models = data.get("models")  # optional list of model IDs from the UI
+    if selected_models is not None:
+        model_cfgs = [m for m in model_cfgs if m.get("model") in selected_models]
     skip = data.get("skip_existing", cfg.get("skip_existing", True))
 
     if not model_cfgs:
-        return jsonify({"error": "No models enabled in config"}), 400
+        return jsonify({"error": "No models selected"}), 400
 
     records = store.get_all_records(dr)
     existing = store.read_attempts(dr)
