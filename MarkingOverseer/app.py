@@ -768,4 +768,10 @@ if __name__ == "__main__":
     dr = load_config().get("data_root") or "(not set — configure in UI)"
     print(f"Data root: {dr}")
     print("Open:      http://127.0.0.1:5001")
-    app.run(debug=True, port=5001, threaded=True)
+    try:
+        from waitress import serve
+        print("Server:    waitress")
+        serve(app, host="127.0.0.1", port=5001)
+    except ImportError:
+        print("Server:    werkzeug (pip install waitress for cleaner shutdown on Windows)")
+        app.run(debug=False, port=5001, threaded=True)
