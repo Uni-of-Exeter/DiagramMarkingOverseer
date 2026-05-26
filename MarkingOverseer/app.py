@@ -943,6 +943,63 @@ def api_attempts_detail():
     return jsonify(attempts[-500:])
 
 
+@app.route("/api/migrate/prompt_hashes", methods=["POST"])
+def api_migrate_prompt_hashes():
+    """Backfill prompt_hash on existing attempts that lack one, using current config.
+
+    Idempotent — only touches attempts where prompt_hash is absent.
+    Also records the current prompts in prompt_history so they are discoverable.
+    """
+    cfg = load_config()
+    dr = cfg.get("data_root", "")
+    if not dr:
+        return jsonify({"status": "ok", "updated": 0})
+
+    prompts = cfg.get("prompts", {})
+
+    def _eff(key):
+        return prompts.get(key) or _PROMPT_DEFAULTS.get(key, "")
+
+    approach_hashes = {
+        "oneshot": _prompt_hash(_eff("oneshot")),
+        "twostep": _prompt_hash(_eff("twostep_extract") + "|" + _eff("twostep_mark")),
+        "answer_sheet": _prompt_hash(_eff("answer_sheet")),
+    }
+
+    history = cfg.get("prompt_history", {})
+    for ap, h in approach_hashes.items():
+        if h not in history:
+            if ap == "oneshot":
+                recs = [("oneshot", _eff("oneshot"))]
+            elif ap == "twostep":
+                recs = [
+                    ("twostep_extract", _eff("twostep_extract")),
+                    ("twostep_mark", _eff("twostep_mark")),
+                ]
+            else:
+                recs = [("answer_sheet", _eff("answer_sheet"))]
+            for key, text in recs:
+                hh = _prompt_hash(text) if text else None
+                if hh and hh not in history:
+                    history[hh] = {"key": key, "text": text, "saved_at": datetime.now().isoformat()}
+
+    attempts = store.read_attempts(dr)
+    updated = 0
+    for a in attempts:
+        if not a.get("prompt_hash") and a.get("ai_approach") in approach_hashes:
+            a["prompt_hash"] = approach_hashes[a["ai_approach"]]
+            updated += 1
+
+    if updated:
+        from pathlib import Path as _Path
+        _ap = _Path(dr) / "MarkingOverseer" / "attempts.json"
+        store._atomic_write(_ap, attempts)
+
+    cfg["prompt_history"] = history
+    save_config(cfg)
+    return jsonify({"status": "ok", "updated": updated})
+
+
 # ── Main page ─────────────────────────────────────────────────────────────────
 
 @app.route("/")

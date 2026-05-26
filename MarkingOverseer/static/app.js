@@ -926,6 +926,8 @@ function esc(str) {
   populateJobSelects();
   renderMarkingModelCheckboxes(state.markingModels);
   populateReviewSelects(null, null);
+  // Backfill prompt_hash on existing attempts using current config (idempotent)
+  api('POST', '/api/migrate/prompt_hashes').catch(() => {});
 
   // Populate stats filter
   const fq = document.getElementById('filter-question');
