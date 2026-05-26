@@ -7,6 +7,7 @@ Open:     http://127.0.0.1:5001
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -28,6 +29,22 @@ import scanner
 import store
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+
+
+def _prompt_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:8]
+
+
+_PROMPT_DEFAULTS = {
+    "student_id": scanner._STUDENT_ID_PROMPT,
+    "header_mark": scanner._HEADER_MARK_PROMPT,
+    "qid": scanner._QID_PROMPT,
+    "body_mark": scanner._BODY_MARK_PROMPT,
+    "oneshot": scanner._ONESHOT_PROMPT,
+    "twostep_extract": scanner._TWOSTEP_EXTRACT_PROMPT,
+    "twostep_mark": scanner._TWOSTEP_MARK_PROMPT,
+    "answer_sheet": scanner._ANSWER_SHEET_MARK_PROMPT,
+}
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -80,6 +97,7 @@ _DEFAULTS: dict = {
         "twostep_mark": "",
         "answer_sheet": "",
     },
+    "prompt_history": {},
 }
 
 
@@ -89,10 +107,11 @@ def load_config() -> dict:
             saved = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
             cfg = {**_DEFAULTS, **saved}
             cfg["prompts"] = {**_DEFAULTS["prompts"], **saved.get("prompts", {})}
+            cfg["prompt_history"] = saved.get("prompt_history", {})
             return cfg
         except Exception:
             pass
-    return {**_DEFAULTS, "prompts": dict(_DEFAULTS["prompts"])}
+    return {**_DEFAULTS, "prompts": dict(_DEFAULTS["prompts"]), "prompt_history": {}}
 
 
 def save_config(cfg: dict) -> None:
@@ -203,6 +222,14 @@ def api_save_config():
     if data.get("anthropic_api_key") == "***":
         data["anthropic_api_key"] = cfg.get("anthropic_api_key", "")
     cfg.update(data)
+    history = cfg.get("prompt_history", {})
+    for key, text in data.get("prompts", {}).items():
+        effective = text or _PROMPT_DEFAULTS.get(key, "")
+        if effective:
+            h = _prompt_hash(effective)
+            if h not in history:
+                history[h] = {"key": key, "text": effective, "saved_at": datetime.now().isoformat()}
+    cfg["prompt_history"] = history
     save_config(cfg)
     return jsonify({"status": "ok"})
 
@@ -225,6 +252,11 @@ def api_prompt_defaults():
         "twostep_mark": scanner._TWOSTEP_MARK_PROMPT,
         "answer_sheet": scanner._ANSWER_SHEET_MARK_PROMPT,
     })
+
+
+@app.route("/api/prompts/history")
+def api_prompt_history():
+    return jsonify(load_config().get("prompt_history", {}))
 
 
 @app.route("/api/logs")
@@ -365,6 +397,13 @@ def api_review(student_key, question):
     for r in file_records:
         fid = r["file_id"]
         fid_attempts = attempts_by_fid.get(fid, [])
+        body_path = store.get_body_pdf(dr, question, fid)
+        body_page_count = 1
+        if body_path:
+            try:
+                body_page_count = scanner.pdf_page_count(body_path.read_bytes())
+            except Exception:
+                pass
         detail.append({
             "file_id": fid,
             "question_id": r.get("QuestionID"),
@@ -377,6 +416,7 @@ def api_review(student_key, question):
             "attempts": fid_attempts,
             "resolved": mat.resolve_mark(fid_attempts, q_override),
             "body_image_url": f"/pdf/body/{question}/{fid}/image",
+            "body_page_count": body_page_count,
             "answer_image_url": (
                 f"/pdf/answer/{question}/{r['QuestionID']}/image"
                 if r.get("QuestionID") else None
@@ -745,6 +785,45 @@ def api_ai_mark():
     _job_log(jid, f"AI marking: {len(work)} items ({len(approaches)} approaches × {len(model_cfgs)} models)")
     prompts = cfg.get("prompts", {})
 
+    def _eff(key):
+        return prompts.get(key) or _PROMPT_DEFAULTS.get(key, "")
+
+    approach_prompt_hashes: dict[str, str | None] = {}
+    for ap in approaches:
+        if ap == "oneshot":
+            t = _eff("oneshot")
+        elif ap == "twostep":
+            t = _eff("twostep_extract") + "|" + _eff("twostep_mark")
+        elif ap == "answer_sheet":
+            t = _eff("answer_sheet")
+        else:
+            t = ""
+        approach_prompt_hashes[ap] = _prompt_hash(t) if t else None
+
+    ph_history = cfg.get("prompt_history", {})
+    ph_changed = False
+    for ap, h in approach_prompt_hashes.items():
+        if not h:
+            continue
+        if h not in ph_history:
+            if ap == "oneshot":
+                _records_to_add = [("oneshot", _eff("oneshot"))]
+            elif ap == "twostep":
+                _records_to_add = [("twostep_extract", _eff("twostep_extract")), ("twostep_mark", _eff("twostep_mark"))]
+            elif ap == "answer_sheet":
+                _records_to_add = [("answer_sheet", _eff("answer_sheet"))]
+            else:
+                _records_to_add = []
+            for _key, _text in _records_to_add:
+                _hh = _prompt_hash(_text) if _text else None
+                if _hh and _hh not in ph_history:
+                    ph_history[_hh] = {"key": _key, "text": _text, "saved_at": datetime.now().isoformat()}
+                    ph_changed = True
+    if ph_changed:
+        _save_cfg = load_config()
+        _save_cfg["prompt_history"] = ph_history
+        save_config(_save_cfg)
+
     def worker(item):
         if _is_cancelled(jid):
             return
@@ -762,6 +841,7 @@ def api_ai_mark():
             "provider": mc["provider"],
             "model": mc["model"],
             "model_label": mc.get("label", mc["model"]),
+            "prompt_hash": approach_prompt_hashes.get(approach),
             "result": None, "reasoning": None, "step1_result": None,
             "raw_response": None, "input_tokens": 0, "output_tokens": 0,
             "latency_ms": 0, "cost_usd": 0.0,
@@ -841,7 +921,12 @@ def api_attempt_stats():
     dr = cfg.get("data_root", "")
     if not dr:
         return jsonify([])
-    return jsonify(mat.attempt_stats(store.read_attempts(dr)))
+    attempts = store.read_attempts(dr)
+    records = store.get_all_records(dr)
+    rows = mat.attempt_stats(attempts, records)
+    rows += mat.ta_stats(records)
+    rows.sort(key=lambda x: x["label"])
+    return jsonify(rows)
 
 
 @app.route("/api/stats/attempts/detail")

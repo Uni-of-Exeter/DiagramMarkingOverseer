@@ -169,22 +169,30 @@ def build_matrix(
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
-def attempt_stats(attempts: list[dict]) -> list[dict]:
-    """Aggregate attempt counts/rates/cost by model × approach."""
+def attempt_stats(attempts: list[dict], records: dict | None = None) -> list[dict]:
+    """Aggregate attempt counts/rates/cost by model × approach × prompt_hash."""
     groups: dict[str, dict] = {}
     for a in attempts:
         if not a.get("result"):
             continue
-        key = f"{a.get('model_label', a.get('model', '?'))} / {a.get('ai_approach', '?')}"
+        model_label = a.get("model_label", a.get("model", "?"))
+        approach = a.get("ai_approach", "?")
+        ph = a.get("prompt_hash") or ""
+        key = f"{model_label}|{approach}|{ph}"
+        label = f"{model_label} / {approach}"
+        if ph:
+            label += f" [{ph[:6]}]"
         if key not in groups:
             groups[key] = {
-                "label": key,
+                "label": label,
                 "model": a.get("model"),
-                "model_label": a.get("model_label", a.get("model")),
-                "approach": a.get("ai_approach"),
+                "model_label": model_label,
+                "approach": approach,
+                "prompt_hash": ph or None,
                 "count": 0, "pass": 0, "fail": 0, "error": 0,
                 "total_input_tokens": 0, "total_output_tokens": 0,
                 "total_cost_usd": 0.0, "total_latency_ms": 0,
+                "ta_agree": 0, "ta_total": 0,
             }
         g = groups[key]
         g["count"] += 1
@@ -193,14 +201,57 @@ def attempt_stats(attempts: list[dict]) -> list[dict]:
         g["total_output_tokens"] += a.get("output_tokens", 0)
         g["total_cost_usd"] += a.get("cost_usd", 0.0)
         g["total_latency_ms"] += a.get("latency_ms", 0)
+        if records is not None:
+            human = records.get(a["file_id"], {}).get("human_mark_header")
+            if human in ("pass", "fail"):
+                g["ta_total"] += 1
+                if human == a.get("result"):
+                    g["ta_agree"] += 1
 
     for g in groups.values():
         n = g["count"]
         g["avg_latency_ms"] = g["total_latency_ms"] // n if n else 0
         g["avg_cost_usd"] = g["total_cost_usd"] / n if n else 0.0
         g["pass_rate"] = g.get("pass", 0) / n if n else 0.0
+        ta_total = g["ta_total"]
+        g["ta_correlation"] = g["ta_agree"] / ta_total if ta_total else None
 
     return sorted(groups.values(), key=lambda x: x["label"])
+
+
+def ta_stats(records: dict) -> list[dict]:
+    pass_ = 0
+    fail_ = 0
+    for r in records.values():
+        h = r.get("human_mark_header")
+        if h == "pass":
+            pass_ += 1
+        elif h == "fail":
+            fail_ += 1
+    count = pass_ + fail_
+    if not count:
+        return []
+    return [{
+        "label": "TA / human",
+        "model": None,
+        "model_label": "TA",
+        "approach": "human",
+        "prompt_hash": None,
+        "count": count,
+        "pass": pass_,
+        "fail": fail_,
+        "error": 0,
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+        "total_cost_usd": 0.0,
+        "total_latency_ms": 0,
+        "avg_latency_ms": 0,
+        "avg_cost_usd": 0.0,
+        "pass_rate": pass_ / count,
+        "ta_agree": count,
+        "ta_total": count,
+        "ta_correlation": 1.0,
+    }]
 
 
 def cost_estimate(model_id: str, input_tokens: int, output_tokens: int) -> float:

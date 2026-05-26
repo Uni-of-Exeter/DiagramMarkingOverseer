@@ -114,7 +114,7 @@ function renderMatrix(data) {
     html += `<tr>`;
     html += `<td>
       <button class="matrix-cell-btn" style="text-align:left;padding:4px 2px;width:auto" onclick="openStudentEdit('${esc(s.student_key)}')">
-        <div style="font-weight:600;font-size:13px">${esc(s.display_name)}</div>
+        <div style="font-weight:600;font-size:13px;color:#7ecfff;text-decoration:underline dotted">${esc(s.display_name)}</div>
         <div class="muted">${esc(String(s.StudentID || s.CandidateNumber || ''))}</div>
       </button>
     </td>`;
@@ -297,12 +297,16 @@ function renderFileRecord(fr, studentKey, question) {
   }
 
   // Images
+  const pageCount = fr.body_page_count || 1;
+  let bodyImgs = '';
+  for (let pg = 0; pg < pageCount; pg++) {
+    bodyImgs += `<img class="pdf-img" style="margin-bottom:6px" src="${fr.body_image_url}?page=${pg}" alt="Student work page ${pg+1}"
+      onerror="this.style.display='none'">`;
+  }
   html += `<div class="review-grid" style="margin-bottom:14px">
     <div>
-      <div class="muted" style="margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Student Work</div>
-      <img class="pdf-img" src="${fr.body_image_url}" alt="Student work"
-           onerror="this.style.display='none';this.nextSibling.style.display='block'">
-      <div style="display:none" class="empty">Body PDF not found</div>
+      <div class="muted" style="margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em">${pageCount > 1 ? `Student Work (${pageCount} pages)` : 'Student Work'}</div>
+      ${bodyImgs}
     </div>
     <div>
       <div class="muted" style="margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Answer Sheet</div>
@@ -337,6 +341,7 @@ function renderAttempt(a) {
       ${a.result ? chip(a.result) : '<span class="muted">—</span>'}
       <span class="attempt-label">${esc(a.model_label || a.model)}</span>
       <span class="badge">${esc(a.ai_approach)}</span>
+      ${a.prompt_hash ? `<span class="badge" style="cursor:pointer;font-family:monospace" onclick="showPromptPopup('${a.prompt_hash}')" title="View prompt">⌨ ${a.prompt_hash.slice(0,6)}</span>` : ''}
       <span class="muted">${fmtMs(a.latency_ms)}  ${fmtCost(a.cost_usd)}</span>
       <span class="muted">${a.input_tokens}+${a.output_tokens} tok</span>
       <div class="spacer"></div>
@@ -374,6 +379,28 @@ async function toggleReject(attemptId, rejected) {
   try {
     await api('POST', `/api/attempt/${attemptId}/reject`, { rejected });
     await loadReview(state.reviewStudent, state.reviewQuestion);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function showPromptPopup(hash) {
+  try {
+    const history = await api('GET', '/api/prompts/history');
+    const entry = history[hash];
+    if (!entry) { alert(`Prompt hash ${hash} not found in history`); return; }
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:2000;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `<div style="background:#161625;border:1px solid #2a2a3e;border-radius:10px;padding:20px;max-width:600px;width:90vw;max-height:80vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px">
+        <span style="font-weight:600;color:#e0e0e0">Prompt: ${esc(entry.key)} <span class="badge" style="font-family:monospace">${hash}</span></span>
+        <button onclick="this.closest('div[style]').remove()" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:16px">✕</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin-bottom:8px">Saved: ${esc(entry.saved_at || '')}</div>
+      <pre style="background:#0f0f1a;padding:12px;border-radius:6px;font-size:12px;color:#e0e0e0;white-space:pre-wrap;word-break:break-word">${esc(entry.text)}</pre>
+    </div>`;
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
   } catch (e) {
     alert('Error: ' + e.message);
   }
@@ -580,6 +607,7 @@ async function loadStats() {
     let html = '<table class="stats-table"><thead><tr>';
     html += '<th>Model / Approach</th><th>Count</th><th>Pass</th><th>Fail</th><th>Error</th>';
     html += '<th>Pass rate</th><th>Avg latency</th><th>Avg cost</th><th>Total cost</th>';
+    html += '<th>Prompt</th><th>TA Corr.</th>';
     html += '</tr></thead><tbody>';
     for (const g of stats) {
       html += `<tr>
@@ -592,6 +620,8 @@ async function loadStats() {
         <td>${fmtMs(g.avg_latency_ms)}</td>
         <td>${fmtCost(g.avg_cost_usd)}</td>
         <td>${fmtCost(g.total_cost_usd)}</td>
+        <td>${g.prompt_hash ? `<span class="badge" style="cursor:pointer;font-family:monospace" onclick="showPromptPopup('${g.prompt_hash}')">${g.prompt_hash.slice(0,6)}</span>` : '<span class="muted">—</span>'}</td>
+        <td>${g.ta_correlation != null ? `${(g.ta_correlation * 100).toFixed(1)}% (${g.ta_agree}/${g.ta_total})` : '<span class="muted">—</span>'}</td>
       </tr>`;
     }
     html += '</tbody></table>';
@@ -690,6 +720,8 @@ function renderMarkingModels(models) {
       </select>
       <input class="input btn-sm" id="m-model-${i}" value="${esc(m.model || '')}" placeholder="model ID" style="flex:1">
       <input class="input btn-sm" id="m-label-${i}" value="${esc(m.label || '')}" placeholder="label" style="max-width:160px">
+      <button class="btn btn-ghost btn-sm" onclick="moveMarkingModel(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button class="btn btn-ghost btn-sm" onclick="moveMarkingModel(${i}, 1)" ${i === models.length - 1 ? 'disabled' : ''}>↓</button>
       <button class="btn btn-danger btn-sm" onclick="removeMarkingModel(${i})">✕</button>
     </div>
   `).join('');
@@ -719,6 +751,14 @@ function addMarkingModel() {
 function removeMarkingModel(idx) {
   const current = gatherMarkingModels();
   current.splice(idx, 1);
+  renderMarkingModels(current);
+}
+
+function moveMarkingModel(idx, dir) {
+  const current = gatherMarkingModels();
+  const target = idx + dir;
+  if (target < 0 || target >= current.length) return;
+  [current[idx], current[target]] = [current[target], current[idx]];
   renderMarkingModels(current);
 }
 
@@ -823,7 +863,7 @@ function openStudentEdit(studentKey) {
     const q = questions[0];
     const fid = firstFiles[0].file_id;
     imgEl.innerHTML = `<img src="/pdf/header/${q}/${encodeURIComponent(fid)}/image"
-      style="max-width:100%;max-height:280px;border-radius:6px;border:1px solid #2a2a3e"
+      style="max-width:100%;max-height:400px;border-radius:6px;border:1px solid #2a2a3e"
       onerror="this.outerHTML='<div class=empty style=padding:24px>Header image not available</div>'">`;
   } else {
     imgEl.innerHTML = '<div class="muted" style="padding:12px;text-align:center">No header scan found</div>';
