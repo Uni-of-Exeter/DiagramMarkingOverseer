@@ -75,10 +75,17 @@ def render_pdf_page(pdf_bytes: bytes, page_num: int = 0, dpi: int = 150) -> byte
 # from the shared Session — Clients are not thread-safe but Sessions are, and
 # credential state lives on the Session so subsequent threads skip the SSO file
 # lock entirely once the first thread has loaded the token.
+#
+# _ensure_creds_initialized() additionally serialises the very first credential
+# fetch so that the botocore tmp→rename write to ~/.aws/sso/cache/ never races
+# across threads. On Windows that rename raises WinError 5 when concurrent.
 
 _sessions: dict[str, object] = {}
 _sessions_lock = threading.Lock()
 _tls = threading.local()
+
+_cred_init_done: set[str] = set()
+_cred_init_lock = threading.Lock()
 
 
 def _get_session(profile: str | None):
@@ -90,10 +97,34 @@ def _get_session(profile: str | None):
         return _sessions[key]
 
 
+def _ensure_creds_initialized(profile: str | None, region: str) -> None:
+    """Serialise the first SSO credential fetch to avoid WinError 5.
+
+    botocore writes the credential cache via temp-rename; on Windows that
+    fails when multiple threads do it simultaneously. Calling
+    get_frozen_credentials() once under a lock triggers the write; all
+    subsequent calls find credentials in memory and skip the disk write.
+    """
+    key = f"{profile}|{region}"
+    if key in _cred_init_done:
+        return
+    with _cred_init_lock:
+        if key in _cred_init_done:
+            return
+        try:
+            creds = _get_session(profile).get_credentials()
+            if creds:
+                creds.get_frozen_credentials()
+        except Exception:
+            pass
+        _cred_init_done.add(key)
+
+
 def _bedrock_client(profile: str | None, region: str):
     key = f"bedrock|{profile}|{region}"
     cache = _tls.__dict__.setdefault("clients", {})
     if key not in cache:
+        _ensure_creds_initialized(profile, region)
         cache[key] = _get_session(profile).client("bedrock-runtime", region_name=region)
     return cache[key]
 
