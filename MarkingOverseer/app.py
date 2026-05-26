@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Lock
 
@@ -26,6 +28,19 @@ import scanner
 import store
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+_LOG_PATH = Path(__file__).parent / "overseer.log"
+
+_log_handler = RotatingFileHandler(
+    _LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+)
+_log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+_log_handler.setLevel(logging.WARNING)
+logging.getLogger().addHandler(_log_handler)
+logging.getLogger().setLevel(logging.WARNING)
+
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -180,6 +195,18 @@ def api_save_config():
 def api_aws_check():
     ok, msg = check_aws(load_config())
     return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/api/logs")
+def api_logs():
+    n = min(int(request.args.get("lines", 200)), 2000)
+    if not _LOG_PATH.exists():
+        return jsonify({"lines": []})
+    try:
+        lines = _LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
+        return jsonify({"lines": lines[-n:]})
+    except Exception as e:
+        return jsonify({"lines": [], "error": str(e)})
 
 
 @app.route("/api/config/questions")

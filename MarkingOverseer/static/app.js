@@ -589,6 +589,7 @@ async function openConfig() {
     document.getElementById('cfg-skip').checked = cfg.skip_existing !== false;
     renderMarkingModels(cfg.marking_models || []);
     document.getElementById('config-modal').classList.add('open');
+    loadLogs();
   } catch (e) {
     alert('Error loading config: ' + e.message);
   }
@@ -661,6 +662,18 @@ async function saveConfig() {
     if (state.currentView === 'matrix') loadMatrix();
   } catch (e) {
     alert('Error saving config: ' + e.message);
+  }
+}
+
+async function loadLogs() {
+  const box = document.getElementById('log-box');
+  if (!box) return;
+  try {
+    const data = await api('GET', '/api/logs?lines=200');
+    box.textContent = data.lines.length ? data.lines.join('\n') : 'No log entries.';
+    box.scrollTop = box.scrollHeight;
+  } catch (e) {
+    box.textContent = 'Error loading logs: ' + e.message;
   }
 }
 

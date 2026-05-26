@@ -380,6 +380,14 @@ table.matrix tr:hover td{background:#161625}
     </div>
 
     <hr class="divider">
+    <div class="row" style="margin-bottom:8px">
+      <p class="muted" style="font-size:12px">Error log (warnings &amp; errors from AI calls)</p>
+      <div class="spacer"></div>
+      <button class="btn btn-ghost btn-sm" onclick="loadLogs()">↻ Refresh</button>
+    </div>
+    <div class="log-box" id="log-box" style="max-height:180px">No log entries.</div>
+
+    <hr class="divider">
     <div class="row">
       <button class="btn btn-primary" onclick="saveConfig()">Save</button>
       <button class="btn btn-ghost" onclick="closeConfig()">Cancel</button>

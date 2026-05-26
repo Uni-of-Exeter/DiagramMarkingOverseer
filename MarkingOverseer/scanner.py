@@ -25,11 +25,14 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import threading
 import time
 
 import fitz  # PyMuPDF
+
+logger = logging.getLogger(__name__)
 
 
 # ── PDF utilities ─────────────────────────────────────────────────────────────
@@ -202,20 +205,30 @@ def _bedrock(model, messages, max_tokens, profile, region):
             }
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
+            msg = e.response.get("Error", {}).get("Message", str(e))
             if code in ("ThrottlingException", "ServiceUnavailableException") and attempt < 2:
+                logger.warning("Bedrock throttle [model=%s region=%s attempt=%d]: %s", model, region, attempt + 1, msg)
                 time.sleep(2 ** attempt)
                 continue
+            logger.error("Bedrock error [model=%s region=%s]: %s %s", model, region, code, msg)
+            raise
+        except Exception as e:
+            logger.error("Bedrock error [model=%s region=%s]: %s: %s", model, region, type(e).__name__, e)
             raise
 
 
 def _anthropic(model, messages, max_tokens, api_key):
     client = _anthropic_client(api_key)
-    resp = client.messages.create(model=model, max_tokens=max_tokens, messages=messages)
-    return {
-        "text": resp.content[0].text.strip(),
-        "input_tokens": resp.usage.input_tokens,
-        "output_tokens": resp.usage.output_tokens,
-    }
+    try:
+        resp = client.messages.create(model=model, max_tokens=max_tokens, messages=messages)
+        return {
+            "text": resp.content[0].text.strip(),
+            "input_tokens": resp.usage.input_tokens,
+            "output_tokens": resp.usage.output_tokens,
+        }
+    except Exception as e:
+        logger.error("Anthropic error [model=%s]: %s: %s", model, type(e).__name__, e)
+        raise
 
 
 def _call_kwargs(cfg: dict) -> dict:
