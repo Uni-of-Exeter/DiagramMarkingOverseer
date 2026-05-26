@@ -466,7 +466,7 @@ def ai_mark_oneshot(
     """One call: worksheet containing the question and student work → pass/fail."""
     resp = _call(
         messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(prompt or _ONESHOT_PROMPT)]}],
-        max_tokens=1000,
+        max_tokens=8192,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
     )
@@ -502,7 +502,7 @@ def ai_mark_twostep(
             body_doc,
             _txt((mark_prompt or _TWOSTEP_MARK_PROMPT).format(correct_answer=correct_answer)),
         ]}],
-        max_tokens=1000,
+        max_tokens=8192,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
     )
@@ -541,7 +541,7 @@ def ai_mark_answer_sheet(
             _pdf(body_pdf_bytes),
             _txt((mark_prompt or _TWOSTEP_MARK_PROMPT).format(correct_answer=correct_answer)),
         ]}],
-        max_tokens=1000,
+        max_tokens=8192,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
     )
