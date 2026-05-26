@@ -264,7 +264,9 @@ def cost_estimate(model_id: str, input_tokens: int, output_tokens: int) -> float
         "claude-haiku-4-5": (0.8, 4.0),
         # Amazon Nova (base rates; eu. cross-region ~10% premium not reflected)
         "nova-pro": (0.8, 3.2),
+        "nova-2-lite": (0.06, 0.24),
         "nova-lite": (0.06, 0.24),
+        "nova-2-micro": (0.035, 0.14),
         "nova-micro": (0.035, 0.14),
     }
     for key, (in_r, out_r) in RATES.items():
