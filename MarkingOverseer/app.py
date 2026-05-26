@@ -33,6 +33,7 @@ _CONFIG_PATH = Path(__file__).parent / "config.json"
 
 _DEFAULTS: dict = {
     "data_root": os.environ.get("OVERSEER_DATA_ROOT", ""),
+    "answer_sheets_root": "",
     "aws_profile": "IncubatorDevOps",
     "aws_region": "eu-north-1",
     "anthropic_api_key": "",
@@ -78,7 +79,7 @@ def _new_job(name: str, total: int) -> str:
     with _JOBS_LOCK:
         _JOBS[jid] = {
             "id": jid, "name": name, "total": total,
-            "done": 0, "errors": 0, "log": [], "running": True,
+            "done": 0, "errors": 0, "log": [], "running": True, "cancelled": False,
         }
     return jid
 
@@ -106,6 +107,21 @@ def _job_finish(jid: str) -> None:
         j = _JOBS.get(jid)
         if j:
             j["running"] = False
+
+
+def _job_cancel(jid: str) -> bool:
+    with _JOBS_LOCK:
+        j = _JOBS.get(jid)
+        if j and j.get("running"):
+            j["cancelled"] = True
+            return True
+    return False
+
+
+def _is_cancelled(jid: str) -> bool:
+    with _JOBS_LOCK:
+        j = _JOBS.get(jid)
+        return bool(j and j.get("cancelled"))
 
 
 def _job_snap(jid: str) -> dict | None:
@@ -371,7 +387,7 @@ def serve_answer_image(question, qid):
     cfg = load_config()
     dr = cfg.get("data_root", "")
     dpi = int(request.args.get("dpi", cfg.get("render_dpi", 150)))
-    return _serve_png(store.get_answer_pdf(dr, question, qid), 0, dpi)
+    return _serve_png(store.get_answer_pdf(dr, question, qid, cfg.get("answer_sheets_root", "")), 0, dpi)
 
 
 # ── Routes: jobs ──────────────────────────────────────────────────────────────
@@ -380,6 +396,12 @@ def serve_answer_image(question, qid):
 def api_job_status(jid):
     snap = _job_snap(jid)
     return jsonify(snap) if snap else (jsonify({"error": "not found"}), 404)
+
+
+@app.route("/api/jobs/<jid>/cancel", methods=["POST"])
+def api_cancel_job(jid):
+    ok = _job_cancel(jid)
+    return jsonify({"cancelled": ok})
 
 
 @app.route("/api/jobs/recent")
@@ -394,11 +416,18 @@ def _run_parallel(jid: str, items: list, worker_fn, workers: int) -> None:
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
         futs = {ex.submit(worker_fn, item): item for item in items}
         for f in as_completed(futs):
+            if _is_cancelled(jid):
+                for pending in futs:
+                    pending.cancel()
+                break
             try:
                 f.result()
             except Exception as e:
                 _job_log(jid, f"  CRASH: {e}")
-    _job_log(jid, "Done.")
+    if _is_cancelled(jid):
+        _job_log(jid, "Cancelled.")
+    else:
+        _job_log(jid, "Done.")
     _job_finish(jid)
 
 
@@ -429,6 +458,8 @@ def api_extract_headers():
     _job_log(jid, f"Extracting student IDs from {len(all_pdfs)} header PDFs")
 
     def worker(item):
+        if _is_cancelled(jid):
+            return
         q, pdf_path = item
         fid = pdf_path.stem[len("header_scan_"):]
         try:
@@ -486,6 +517,8 @@ def api_extract_bodies():
     _job_log(jid, f"Extracting QIDs from {len(all_pdfs)} body PDFs")
 
     def worker(item):
+        if _is_cancelled(jid):
+            return
         q, pdf_path = item
         fid = pdf_path.stem[len("body_scan_"):]
         try:
@@ -534,6 +567,8 @@ def api_extract_human_marks():
     _job_log(jid, f"Extracting TA marks from {len(all_items)} PDFs")
 
     def worker(item):
+        if _is_cancelled(jid):
+            return
         side, q, pdf_path = item
         prefix = f"{side}_scan_"
         fid = pdf_path.stem[len(prefix):]
@@ -608,6 +643,8 @@ def api_ai_mark():
     _job_log(jid, f"AI marking: {len(work)} items ({len(approaches)} approaches × {len(model_cfgs)} models)")
 
     def worker(item):
+        if _is_cancelled(jid):
+            return
         rec, approach, mc = item
         fid = rec["file_id"]
         question = rec["question"]
@@ -633,7 +670,7 @@ def api_ai_mark():
                 raise FileNotFoundError(f"No body PDF for {fid}")
             body_bytes = body_path.read_bytes()
 
-            answer_path = store.get_answer_pdf(dr, question, qid)
+            answer_path = store.get_answer_pdf(dr, question, qid, cfg.get("answer_sheets_root", ""))
             answer_bytes = answer_path.read_bytes() if answer_path else None
 
             kwargs = dict(

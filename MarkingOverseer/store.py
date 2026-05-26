@@ -8,10 +8,21 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from pathlib import Path
 from threading import Lock
 
-_WRITE_LOCK = Lock()
+# Per-path locks so concurrent workers on different questions don't serialise each other.
+_path_locks: dict[str, Lock] = {}
+_path_locks_mutex = threading.Lock()
+
+
+def _path_lock(path: Path) -> Lock:
+    key = str(path)
+    with _path_locks_mutex:
+        if key not in _path_locks:
+            _path_locks[key] = Lock()
+        return _path_locks[key]
 
 
 def _atomic_write(path: Path, data) -> None:
@@ -48,7 +59,8 @@ def upsert_scan_field(
     data_root: str, scan_type: str, question: str, file_id: str, fields: dict
 ) -> None:
     """Thread-safe update of a single file_id's fields in Scans.json."""
-    with _WRITE_LOCK:
+    path = _scans_path(data_root, scan_type, question)
+    with _path_lock(path):
         data = read_scans(data_root, scan_type, question)
         if file_id not in data:
             data[file_id] = {}
@@ -102,12 +114,22 @@ def get_header_pdf(data_root: str, question: str, file_id: str) -> Path | None:
     return p if p.exists() else None
 
 
-def get_answer_pdf(data_root: str, question: str, qid: str) -> Path | None:
-    """Find answer PDF for a question_id in body/{question}/."""
+def get_answer_pdf(data_root: str, question: str, qid: str, answer_sheets_root: str = "") -> Path | None:
+    """Find answer PDF for a question_id.
+
+    Searches answer_sheets_root/{question}/ first (if configured), then falls
+    back to body/{question}/ (excluding body_scan_* files).
+    """
+    qid_lower = qid.lower()
+    if answer_sheets_root:
+        answer_dir = Path(answer_sheets_root) / question
+        if answer_dir.exists():
+            for pdf in answer_dir.glob("*.pdf"):
+                if pdf.stem.lower() == qid_lower:
+                    return pdf
     body_dir = Path(data_root) / "body" / question
     if not body_dir.exists():
         return None
-    qid_lower = qid.lower()
     for pdf in body_dir.glob("*.pdf"):
         if pdf.stem.startswith("body_scan_"):
             continue
@@ -145,19 +167,21 @@ def read_attempts(data_root: str) -> list[dict]:
 
 
 def append_attempt(data_root: str, attempt: dict) -> None:
-    with _WRITE_LOCK:
+    path = _attempts_path(data_root)
+    with _path_lock(path):
         attempts = read_attempts(data_root)
         attempts.append(attempt)
-        _atomic_write(_attempts_path(data_root), attempts)
+        _atomic_write(path, attempts)
 
 
 def update_attempt(data_root: str, attempt_id: str, fields: dict) -> bool:
-    with _WRITE_LOCK:
+    path = _attempts_path(data_root)
+    with _path_lock(path):
         attempts = read_attempts(data_root)
         for a in attempts:
             if a.get("attempt_id") == attempt_id:
                 a.update(fields)
-                _atomic_write(_attempts_path(data_root), attempts)
+                _atomic_write(path, attempts)
                 return True
         return False
 
@@ -174,7 +198,8 @@ def read_overrides(data_root: str) -> dict:
 
 def write_override(data_root: str, student_key: str, question: str, value: str | None) -> None:
     """Set or clear a mark override. value=None clears."""
-    with _WRITE_LOCK:
+    path = _overrides_path(data_root)
+    with _path_lock(path):
         overrides = read_overrides(data_root)
         if student_key not in overrides:
             overrides[student_key] = {}
@@ -182,7 +207,7 @@ def write_override(data_root: str, student_key: str, question: str, value: str |
             overrides[student_key].pop(question, None)
         else:
             overrides[student_key][question] = value
-        _atomic_write(_overrides_path(data_root), overrides)
+        _atomic_write(path, overrides)
 
 
 # ── Students ──────────────────────────────────────────────────────────────────

@@ -12,7 +12,8 @@ let state = {
   reviewData: null,    // api response
   config: null,
   questions: window.INIT ? window.INIT.questions : [],
-  jobPolls: {},        // jid → intervalId
+  jobPolls: {},        // prefix → intervalId
+  jobIds: {},          // prefix → jid
 };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -353,6 +354,29 @@ function populateJobSelects() {
   if (fq) fq.innerHTML = opts;
 }
 
+function _jobStarted(prefix, jid) {
+  state.jobIds[prefix] = jid;
+  const runBtn = document.getElementById(prefix + '-run');
+  const stopBtn = document.getElementById(prefix + '-stop');
+  if (runBtn) runBtn.disabled = true;
+  if (stopBtn) stopBtn.style.display = '';
+}
+
+function _jobEnded(prefix) {
+  const runBtn = document.getElementById(prefix + '-run');
+  const stopBtn = document.getElementById(prefix + '-stop');
+  if (runBtn) runBtn.disabled = false;
+  if (stopBtn) stopBtn.style.display = 'none';
+}
+
+async function cancelJob(prefix) {
+  const jid = state.jobIds[prefix];
+  if (!jid) return;
+  try {
+    await api('POST', `/api/jobs/${jid}/cancel`);
+  } catch (_) {}
+}
+
 async function runJob(endpoint, prefix) {
   const qSel = document.getElementById(prefix + '-questions');
   const q = qSel ? qSel.value : null;
@@ -360,6 +384,7 @@ async function runJob(endpoint, prefix) {
 
   try {
     const r = await api('POST', `/api/jobs/${endpoint}`, body);
+    _jobStarted(prefix, r.job_id);
     pollJob(r.job_id, prefix);
   } catch (e) {
     alert('Error starting job: ' + e.message);
@@ -380,6 +405,7 @@ async function runAiMark() {
 
   try {
     const r = await api('POST', '/api/jobs/ai_mark', body);
+    _jobStarted('j4', r.job_id);
     pollJob(r.job_id, 'j4');
   } catch (e) {
     alert('Error starting AI mark: ' + e.message);
@@ -407,6 +433,7 @@ function pollJob(jid, prefix) {
       if (!s.running) {
         clearInterval(state.jobPolls[prefix]);
         delete state.jobPolls[prefix];
+        _jobEnded(prefix);
         // Refresh questions list in case new folders appeared
         const qs = await api('GET', '/api/config/questions');
         state.questions = qs;
@@ -414,6 +441,7 @@ function pollJob(jid, prefix) {
       }
     } catch (e) {
       clearInterval(state.jobPolls[prefix]);
+      _jobEnded(prefix);
     }
   }, 1500);
 }
@@ -550,6 +578,7 @@ async function openConfig() {
     const cfg = await api('GET', '/api/config');
     state.config = cfg;
     document.getElementById('cfg-data-root').value = cfg.data_root || '';
+    document.getElementById('cfg-answer-sheets-root').value = cfg.answer_sheets_root || '';
     document.getElementById('cfg-aws-profile').value = cfg.aws_profile || '';
     document.getElementById('cfg-aws-region').value = cfg.aws_region || '';
     document.getElementById('cfg-anthropic-key').value = cfg.anthropic_api_key || '';
@@ -611,6 +640,7 @@ function removeMarkingModel(idx) {
 async function saveConfig() {
   const cfg = {
     data_root: document.getElementById('cfg-data-root').value.trim(),
+    answer_sheets_root: document.getElementById('cfg-answer-sheets-root').value.trim(),
     aws_profile: document.getElementById('cfg-aws-profile').value.trim(),
     aws_region: document.getElementById('cfg-aws-region').value.trim(),
     anthropic_api_key: document.getElementById('cfg-anthropic-key').value.trim() || '***',

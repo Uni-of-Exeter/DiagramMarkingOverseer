@@ -186,7 +186,8 @@ table.matrix tr:hover td{background:#161625}
           <select class="input" id="j1-questions" style="max-width:200px">
             <option value="">All questions</option>
           </select>
-          <button class="btn btn-primary btn-sm" onclick="runJob('extract_headers','j1')">Run</button>
+          <button class="btn btn-primary btn-sm" id="j1-run" onclick="runJob('extract_headers','j1')">Run</button>
+          <button class="btn btn-danger btn-sm" id="j1-stop" style="display:none" onclick="cancelJob('j1')">Stop</button>
         </div>
         <div id="j1-progress" style="display:none">
           <div class="progress-bar"><div class="progress-fill" id="j1-fill" style="width:0%"></div></div>
@@ -202,7 +203,8 @@ table.matrix tr:hover td{background:#161625}
           <select class="input" id="j2-questions" style="max-width:200px">
             <option value="">All questions</option>
           </select>
-          <button class="btn btn-primary btn-sm" onclick="runJob('extract_bodies','j2')">Run</button>
+          <button class="btn btn-primary btn-sm" id="j2-run" onclick="runJob('extract_bodies','j2')">Run</button>
+          <button class="btn btn-danger btn-sm" id="j2-stop" style="display:none" onclick="cancelJob('j2')">Stop</button>
         </div>
         <div id="j2-progress" style="display:none">
           <div class="progress-bar"><div class="progress-fill" id="j2-fill" style="width:0%"></div></div>
@@ -218,7 +220,8 @@ table.matrix tr:hover td{background:#161625}
           <select class="input" id="j3-questions" style="max-width:200px">
             <option value="">All questions</option>
           </select>
-          <button class="btn btn-ghost btn-sm" onclick="runJob('extract_human_marks','j3')">Run</button>
+          <button class="btn btn-ghost btn-sm" id="j3-run" onclick="runJob('extract_human_marks','j3')">Run</button>
+          <button class="btn btn-danger btn-sm" id="j3-stop" style="display:none" onclick="cancelJob('j3')">Stop</button>
         </div>
         <div id="j3-progress" style="display:none">
           <div class="progress-bar"><div class="progress-fill" id="j3-fill" style="width:0%"></div></div>
@@ -247,7 +250,10 @@ table.matrix tr:hover td{background:#161625}
             <span class="text-sm">Skip already-marked</span>
           </label>
         </div>
-        <button class="btn btn-success btn-sm" onclick="runAiMark()">Run AI Marking</button>
+        <div class="row">
+          <button class="btn btn-success btn-sm" id="j4-run" onclick="runAiMark()">Run AI Marking</button>
+          <button class="btn btn-danger btn-sm" id="j4-stop" style="display:none" onclick="cancelJob('j4')">Stop</button>
+        </div>
         <div id="j4-progress" style="display:none">
           <div class="progress-bar"><div class="progress-fill" id="j4-fill" style="width:0%"></div></div>
           <div class="log-box" id="j4-log"></div>
@@ -311,6 +317,10 @@ table.matrix tr:hover td{background:#161625}
       <label>Data Root (parent folder containing body/ and header/)</label>
       <input class="input" id="cfg-data-root" placeholder="/path/to/scans">
     </div>
+    <div class="field">
+      <label>Answer Sheets Root (optional — overrides body/ as answer PDF source)</label>
+      <input class="input" id="cfg-answer-sheets-root" placeholder="/path/to/answer-sheets">
+    </div>
 
     <hr class="divider">
     <p class="muted" style="margin-bottom:10px;font-size:12px">AWS Bedrock credentials</p>
@@ -360,7 +370,7 @@ table.matrix tr:hover td{background:#161625}
         <input class="input" id="cfg-workers" type="number" min="1" max="20" style="width:80px">
       </div>
       <div class="field mb-0">
-        <label>Render DPI</label>
+        <label>Max Render DPI</label>
         <input class="input" id="cfg-dpi" type="number" min="72" max="300" style="width:80px">
       </div>
       <div class="field mb-0" style="display:flex;align-items:center;gap:6px;margin-top:18px">

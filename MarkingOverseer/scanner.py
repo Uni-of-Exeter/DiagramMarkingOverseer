@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import threading
 import time
 
 import fitz  # PyMuPDF
@@ -33,25 +34,65 @@ import fitz  # PyMuPDF
 
 # ── PDF utilities ─────────────────────────────────────────────────────────────
 
-_DPI_LADDER = [150, 120, 100, 80]
+# Fixed step-down points; render_pdf_page inserts the caller's max at the front.
+_DPI_STEPS = [300, 250, 200, 150, 120, 100, 80, 72]
 _PNG_RAW_LIMIT = (5 * 1024 * 1024 * 3) // 4  # so base64-encoded < 5 MB
 
 
 def render_pdf_page(pdf_bytes: bytes, page_num: int = 0, dpi: int = 150) -> bytes:
-    """Render one page to PNG, stepping DPI down if the result is too large."""
+    """Render one page to PNG.
+
+    `dpi` is the maximum resolution. If the PNG exceeds the API size limit,
+    the function steps down through lower DPI values automatically until it fits.
+    """
+    # Build deduplicated descending ladder starting at the requested max.
+    seen: set[int] = set()
+    ladder: list[int] = []
+    for d in [dpi] + [s for s in _DPI_STEPS if s < dpi]:
+        if d not in seen:
+            seen.add(d)
+            ladder.append(d)
+
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         idx = min(page_num, len(doc) - 1)
         page = doc[idx]
-        for try_dpi in [dpi] + [d for d in _DPI_LADDER if d < dpi]:
+        png = b""
+        for try_dpi in ladder:
             zoom = try_dpi / 72
             pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
             png = pix.tobytes("png")
             if len(png) <= _PNG_RAW_LIMIT:
                 return png
-        return png  # last resort
+        return png  # last resort: smallest result even if over limit
     finally:
         doc.close()
+
+
+# ── Thread-local AI client cache ──────────────────────────────────────────────
+# Each worker thread keeps its own boto3/anthropic client so they never share
+# mutable session state, which removes per-call session-creation overhead.
+
+_tls = threading.local()
+
+
+def _bedrock_client(profile: str | None, region: str):
+    key = f"bedrock|{profile}|{region}"
+    cache = _tls.__dict__.setdefault("clients", {})
+    if key not in cache:
+        import boto3
+        session = boto3.Session(profile_name=profile) if profile else boto3.Session()
+        cache[key] = session.client("bedrock-runtime", region_name=region)
+    return cache[key]
+
+
+def _anthropic_client(api_key: str):
+    key = f"anthropic|{api_key[:8]}"
+    cache = _tls.__dict__.setdefault("clients", {})
+    if key not in cache:
+        import anthropic as sdk
+        cache[key] = sdk.Anthropic(api_key=api_key)
+    return cache[key]
 
 
 def pdf_page_count(pdf_bytes: bytes) -> int:
@@ -98,11 +139,9 @@ def _call(
 
 
 def _bedrock(model, messages, max_tokens, profile, region):
-    import boto3
     from botocore.exceptions import ClientError
 
-    session = boto3.Session(profile_name=profile) if profile else boto3.Session()
-    client = session.client("bedrock-runtime", region_name=region)
+    client = _bedrock_client(profile, region)
     body = {"anthropic_version": "bedrock-2023-05-31", "max_tokens": max_tokens, "messages": messages}
     for attempt in range(3):
         try:
@@ -123,9 +162,7 @@ def _bedrock(model, messages, max_tokens, profile, region):
 
 
 def _anthropic(model, messages, max_tokens, api_key):
-    import anthropic as sdk
-
-    client = sdk.Anthropic(api_key=api_key)
+    client = _anthropic_client(api_key)
     resp = client.messages.create(model=model, max_tokens=max_tokens, messages=messages)
     return {
         "text": resp.content[0].text.strip(),
