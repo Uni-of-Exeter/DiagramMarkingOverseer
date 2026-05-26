@@ -943,6 +943,33 @@ def api_attempts_detail():
     return jsonify(attempts[-500:])
 
 
+@app.route("/api/migrate/costs", methods=["POST"])
+def api_migrate_costs():
+    """Recalculate cost_usd for attempts where it is 0 but tokens are known.
+
+    Idempotent — only touches attempts with cost_usd == 0 and input_tokens > 0.
+    """
+    cfg = load_config()
+    dr = cfg.get("data_root", "")
+    if not dr:
+        return jsonify({"status": "ok", "updated": 0})
+
+    attempts = store.read_attempts(dr)
+    updated = 0
+    for a in attempts:
+        if a.get("cost_usd", 0) == 0 and a.get("input_tokens", 0) > 0:
+            cost = mat.cost_estimate(a.get("model", ""), a["input_tokens"], a.get("output_tokens", 0))
+            if cost > 0:
+                a["cost_usd"] = cost
+                updated += 1
+
+    if updated:
+        from pathlib import Path as _Path
+        store._atomic_write(_Path(dr) / "MarkingOverseer" / "attempts.json", attempts)
+
+    return jsonify({"status": "ok", "updated": updated})
+
+
 @app.route("/api/migrate/prompt_hashes", methods=["POST"])
 def api_migrate_prompt_hashes():
     """Backfill prompt_hash on attempts that lack one using the built-in default prompts.
