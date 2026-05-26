@@ -247,15 +247,37 @@ def _call_kwargs(cfg: dict) -> dict:
 
 
 def _parse_mark_json(text: str) -> tuple[str, str]:
-    """Parse a JSON {result, reasoning} response. Falls back to keyword search."""
-    try:
-        clean = re.sub(r"```(?:json)?\s*|\s*```", "", text).strip()
-        data = json.loads(clean)
-        r = data.get("result", "").lower()
-        if r in ("pass", "fail"):
-            return r, data.get("reasoning", "")
-    except Exception:
-        pass
+    """Extract pass/fail from a response that may contain reasoning before the JSON.
+
+    Searches backward through all balanced {…} blocks for the last one that
+    parses as valid JSON containing a 'result' field.
+    """
+    clean = re.sub(r"```(?:json)?\s*|\s*```", "", text)
+
+    # Collect all top-level balanced {...} blocks
+    blocks: list[str] = []
+    for m in re.finditer(r"\{", clean):
+        start, depth = m.start(), 0
+        for j, c in enumerate(clean[start:]):
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    blocks.append(clean[start : start + j + 1])
+                    break
+
+    # Try from last block to first (JSON is asked to appear at the end)
+    for block in reversed(blocks):
+        try:
+            data = json.loads(block)
+            r = data.get("result", "").lower()
+            if r in ("pass", "fail"):
+                return r, data.get("reasoning", "")
+        except json.JSONDecodeError:
+            continue
+
+    # Keyword fallback
     if re.search(r"\bpass\b", text, re.IGNORECASE):
         return "pass", text
     if re.search(r"\bfail\b", text, re.IGNORECASE):
@@ -356,8 +378,9 @@ _ONESHOT_PROMPT = (
     "You are marking a student's mathematics worksheet. "
     "The worksheet shows the printed question and the student's handwritten work. "
     "Mark as pass if the student's answer is mathematically correct, fail if incorrect. "
-    "Students may write corrections anywhere on the page — consider all written work. "
-    'Respond with exactly this JSON: {"result": "pass" or "fail", "reasoning": "one sentence"}'
+    "Students may write corrections anywhere on the page — consider all written work.\n\n"
+    "Reason through your marking, then finish your response with this JSON on its own line:\n"
+    '{"result": "pass" or "fail", "reasoning": "one sentence summary"}'
 )
 
 _TWOSTEP_EXTRACT_PROMPT = (
@@ -371,10 +394,11 @@ _TWOSTEP_EXTRACT_PROMPT = (
 _TWOSTEP_MARK_PROMPT = (
     "You are marking a student's mathematics worksheet. "
     "The correct answer for this question is:\n{correct_answer}\n\n"
-    "Examine the student's work in the image. Their answer is correct if it is "
+    "Examine the student's work. Their answer is correct if it is "
     "mathematically equivalent to the correct answer, regardless of notation or layout. "
-    "Students may write corrections anywhere on the page. "
-    'Respond with exactly this JSON: {{"result": "pass" or "fail", "reasoning": "one sentence"}}'
+    "Students may write corrections anywhere on the page.\n\n"
+    "Reason through your marking, then finish your response with this JSON on its own line:\n"
+    '{{"result": "pass" or "fail", "reasoning": "one sentence summary"}}'
 )
 
 _ANSWER_SHEET_EXTRACT_PROMPT = (
@@ -442,7 +466,7 @@ def ai_mark_oneshot(
     """One call: worksheet containing the question and student work → pass/fail."""
     resp = _call(
         messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(prompt or _ONESHOT_PROMPT)]}],
-        max_tokens=300,
+        max_tokens=1000,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
     )
@@ -478,7 +502,7 @@ def ai_mark_twostep(
             body_doc,
             _txt((mark_prompt or _TWOSTEP_MARK_PROMPT).format(correct_answer=correct_answer)),
         ]}],
-        max_tokens=300,
+        max_tokens=1000,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
     )
@@ -517,7 +541,7 @@ def ai_mark_answer_sheet(
             _pdf(body_pdf_bytes),
             _txt((mark_prompt or _TWOSTEP_MARK_PROMPT).format(correct_answer=correct_answer)),
         ]}],
-        max_tokens=300,
+        max_tokens=1000,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
     )
