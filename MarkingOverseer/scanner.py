@@ -303,18 +303,18 @@ _BODY_MARK_PROMPT = (
 
 _ONESHOT_PROMPT = (
     "You are marking a student's mathematics worksheet. "
-    "The first image is the official answer sheet for this question variant. "
-    "The second image is the student's submitted work. "
-    "The student's answer is correct if it is mathematically equivalent to the answer sheet, "
-    "regardless of notation or layout. Students may write corrections anywhere on the page — "
-    "look at all written work, not only designated answer boxes. "
+    "The worksheet shows the printed question and the student's handwritten work. "
+    "Mark as pass if the student's answer is mathematically correct, fail if incorrect. "
+    "Students may write corrections anywhere on the page — consider all written work. "
     'Respond with exactly this JSON: {"result": "pass" or "fail", "reasoning": "one sentence"}'
 )
 
 _TWOSTEP_EXTRACT_PROMPT = (
-    "You are looking at an official mathematics answer sheet for a specific question variant. "
-    "Extract and describe the complete correct answer with all numerical values, "
-    "algebraic expressions, steps, and notation needed to verify a student's response."
+    "You are looking at a student's mathematics worksheet. "
+    "The printed question appears on this page. "
+    "Extract and describe the complete correct answer to the question, "
+    "with all numerical values, algebraic expressions, steps, and notation "
+    "needed to verify a student's response. Ignore the student's handwriting for now."
 )
 
 _TWOSTEP_MARK_PROMPT = (
@@ -324,6 +324,12 @@ _TWOSTEP_MARK_PROMPT = (
     "mathematically equivalent to the correct answer, regardless of notation or layout. "
     "Students may write corrections anywhere on the page. "
     'Respond with exactly this JSON: {{"result": "pass" or "fail", "reasoning": "one sentence"}}'
+)
+
+_ANSWER_SHEET_EXTRACT_PROMPT = (
+    "You are looking at an official mathematics answer sheet for a specific question variant. "
+    "Extract and describe the complete correct answer with all numerical values, "
+    "algebraic expressions, steps, and notation needed to verify a student's response."
 )
 
 
@@ -377,8 +383,7 @@ def extract_human_mark_body(
 
 
 def ai_mark_oneshot(
-    answer_pdf_bytes: bytes,  # WORK ZONE: answer only
-    body_pdf_bytes: bytes,    # WORK ZONE: student work only
+    body_pdf_bytes: bytes,    # WORK ZONE: student work (question printed on sheet)
     provider: str,
     model: str,
     aws_profile: str | None = None,
@@ -386,14 +391,10 @@ def ai_mark_oneshot(
     anthropic_api_key: str | None = None,
     dpi: int = 150,
 ) -> dict:
-    """One call: answer sheet + student work → pass/fail."""
-    answer_png = render_pdf_page(answer_pdf_bytes, 0, dpi)
+    """One call: worksheet containing the question and student work → pass/fail."""
     body_png = render_pdf_page(body_pdf_bytes, 0, dpi)
     resp = _call(
-        messages=[{"role": "user", "content": [
-            _img(answer_png), _txt("Official answer sheet:"),
-            _img(body_png), _txt("Student work:\n\n" + _ONESHOT_PROMPT),
-        ]}],
+        messages=[{"role": "user", "content": [_img(body_png), _txt(_ONESHOT_PROMPT)]}],
         max_tokens=300,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -405,8 +406,7 @@ def ai_mark_oneshot(
 
 
 def ai_mark_twostep(
-    answer_pdf_bytes: bytes,  # WORK ZONE: answer only
-    body_pdf_bytes: bytes,    # WORK ZONE: student work only
+    body_pdf_bytes: bytes,    # WORK ZONE: student work (question printed on sheet)
     provider: str,
     model: str,
     aws_profile: str | None = None,
@@ -414,12 +414,11 @@ def ai_mark_twostep(
     anthropic_api_key: str | None = None,
     dpi: int = 150,
 ) -> dict:
-    """Two calls: extract correct answer, then compare to student work."""
-    answer_png = render_pdf_page(answer_pdf_bytes, 0, dpi)
+    """Two calls: derive correct answer from printed question, then mark student work."""
     body_png = render_pdf_page(body_pdf_bytes, 0, dpi)
 
     step1 = _call(
-        messages=[{"role": "user", "content": [_img(answer_png), _txt(_TWOSTEP_EXTRACT_PROMPT)]}],
+        messages=[{"role": "user", "content": [_img(body_png), _txt(_TWOSTEP_EXTRACT_PROMPT)]}],
         max_tokens=600,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
@@ -446,7 +445,7 @@ def ai_mark_twostep(
 
 
 def ai_mark_answer_sheet(
-    answer_pdf_bytes: bytes,  # WORK ZONE: answer only
+    answer_pdf_bytes: bytes,  # WORK ZONE: answer sheet PDF (looked up by QID)
     body_pdf_bytes: bytes,    # WORK ZONE: student work only
     provider: str,
     model: str,
@@ -455,11 +454,32 @@ def ai_mark_answer_sheet(
     anthropic_api_key: str | None = None,
     dpi: int = 150,
 ) -> dict:
-    """
-    Answer-sheet approach: answer PDF is looked up by question_id (done in the caller),
-    then compared using the two-step method. Kept separate for logging/comparison.
-    """
-    return ai_mark_twostep(
-        answer_pdf_bytes, body_pdf_bytes,
-        provider, model, aws_profile, aws_region, anthropic_api_key, dpi,
+    """Two calls: extract correct answer from answer sheet PDF, then mark student work."""
+    answer_png = render_pdf_page(answer_pdf_bytes, 0, dpi)
+    body_png = render_pdf_page(body_pdf_bytes, 0, dpi)
+
+    step1 = _call(
+        messages=[{"role": "user", "content": [_img(answer_png), _txt(_ANSWER_SHEET_EXTRACT_PROMPT)]}],
+        max_tokens=600,
+        provider=provider, model=model,
+        aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
     )
+    correct_answer = step1["text"]
+
+    step2 = _call(
+        messages=[{"role": "user", "content": [
+            _img(body_png),
+            _txt(_TWOSTEP_MARK_PROMPT.format(correct_answer=correct_answer)),
+        ]}],
+        max_tokens=300,
+        provider=provider, model=model,
+        aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
+    )
+    result, reasoning = _parse_mark_json(step2["text"])
+    return {
+        "result": result, "reasoning": reasoning, "raw_response": step2["text"],
+        "step1_result": correct_answer,
+        "input_tokens": step1["input_tokens"] + step2["input_tokens"],
+        "output_tokens": step1["output_tokens"] + step2["output_tokens"],
+        "latency_ms": step1["latency_ms"] + step2["latency_ms"],
+    }

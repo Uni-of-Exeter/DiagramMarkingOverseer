@@ -674,9 +674,6 @@ def api_ai_mark():
                 raise FileNotFoundError(f"No body PDF for {fid}")
             body_bytes = body_path.read_bytes()
 
-            answer_path = store.get_answer_pdf(dr, question, qid, cfg.get("answer_sheets_root", ""))
-            answer_bytes = answer_path.read_bytes() if answer_path else None
-
             kwargs = dict(
                 provider=mc["provider"], model=mc["model"],
                 aws_profile=cfg.get("aws_profile"),
@@ -686,17 +683,14 @@ def api_ai_mark():
             )
 
             if approach == "oneshot":
-                if not answer_bytes:
-                    raise FileNotFoundError(f"No answer PDF for QID {qid}")
-                result = scanner.ai_mark_oneshot(answer_bytes, body_bytes, **kwargs)
+                result = scanner.ai_mark_oneshot(body_bytes, **kwargs)
             elif approach == "twostep":
-                if not answer_bytes:
-                    raise FileNotFoundError(f"No answer PDF for QID {qid}")
-                result = scanner.ai_mark_twostep(answer_bytes, body_bytes, **kwargs)
+                result = scanner.ai_mark_twostep(body_bytes, **kwargs)
             elif approach == "answer_sheet":
-                if not answer_bytes:
+                answer_path = store.get_answer_pdf(dr, question, qid, cfg.get("answer_sheets_root", ""))
+                if not answer_path:
                     raise FileNotFoundError(f"No answer PDF for QID {qid}")
-                result = scanner.ai_mark_answer_sheet(answer_bytes, body_bytes, **kwargs)
+                result = scanner.ai_mark_answer_sheet(answer_path.read_bytes(), body_bytes, **kwargs)
             else:
                 raise ValueError(f"Unknown approach: {approach!r}")
 
