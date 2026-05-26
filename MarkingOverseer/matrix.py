@@ -256,11 +256,16 @@ def ta_stats(records: dict) -> list[dict]:
 
 def cost_estimate(model_id: str, input_tokens: int, output_tokens: int) -> float:
     RATES = {
+        # Anthropic Claude (per million tokens: input, output)
         "claude-opus-4-7": (15.0, 75.0),
         "claude-opus-4-5": (15.0, 75.0),
         "claude-sonnet-4-6": (3.0, 15.0),
         "claude-sonnet-4-5": (3.0, 15.0),
         "claude-haiku-4-5": (0.8, 4.0),
+        # Amazon Nova (base rates; eu. cross-region ~10% premium not reflected)
+        "nova-pro": (0.8, 3.2),
+        "nova-lite": (0.06, 0.24),
+        "nova-micro": (0.035, 0.14),
     }
     for key, (in_r, out_r) in RATES.items():
         if key in model_id:
