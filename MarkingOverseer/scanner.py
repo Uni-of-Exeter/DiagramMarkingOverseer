@@ -69,20 +69,32 @@ def render_pdf_page(pdf_bytes: bytes, page_num: int = 0, dpi: int = 150) -> byte
         doc.close()
 
 
-# ── Thread-local AI client cache ──────────────────────────────────────────────
-# Each worker thread keeps its own boto3/anthropic client so they never share
-# mutable session state, which removes per-call session-creation overhead.
+# ── AI client cache ────────────────────────────────────────────────────────────
+# boto3 Sessions are shared at the module level (one per profile) so that SSO
+# credentials are loaded exactly once. Each thread then creates its own Client
+# from the shared Session — Clients are not thread-safe but Sessions are, and
+# credential state lives on the Session so subsequent threads skip the SSO file
+# lock entirely once the first thread has loaded the token.
 
+_sessions: dict[str, object] = {}
+_sessions_lock = threading.Lock()
 _tls = threading.local()
+
+
+def _get_session(profile: str | None):
+    key = str(profile)
+    with _sessions_lock:
+        if key not in _sessions:
+            import boto3
+            _sessions[key] = boto3.Session(profile_name=profile) if profile else boto3.Session()
+        return _sessions[key]
 
 
 def _bedrock_client(profile: str | None, region: str):
     key = f"bedrock|{profile}|{region}"
     cache = _tls.__dict__.setdefault("clients", {})
     if key not in cache:
-        import boto3
-        session = boto3.Session(profile_name=profile) if profile else boto3.Session()
-        cache[key] = session.client("bedrock-runtime", region_name=region)
+        cache[key] = _get_session(profile).client("bedrock-runtime", region_name=region)
     return cache[key]
 
 

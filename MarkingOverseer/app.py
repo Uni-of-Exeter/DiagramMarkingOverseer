@@ -462,6 +462,7 @@ def api_extract_headers():
             return
         q, pdf_path = item
         fid = pdf_path.stem[len("header_scan_"):]
+        _job_log(jid, f"  → {pdf_path.name}")
         try:
             result = scanner.extract_student_identifier(
                 pdf_path.read_bytes(),
@@ -521,6 +522,7 @@ def api_extract_bodies():
             return
         q, pdf_path = item
         fid = pdf_path.stem[len("body_scan_"):]
+        _job_log(jid, f"  → {pdf_path.name}")
         try:
             result = scanner.extract_question_id(
                 pdf_path.read_bytes(),
@@ -572,6 +574,7 @@ def api_extract_human_marks():
         side, q, pdf_path = item
         prefix = f"{side}_scan_"
         fid = pdf_path.stem[len(prefix):]
+        _job_log(jid, f"  → {side}/{pdf_path.name}")
         try:
             if side == "body":
                 result = scanner.extract_human_mark_body(
@@ -649,6 +652,7 @@ def api_ai_mark():
         fid = rec["file_id"]
         question = rec["question"]
         qid = rec["QuestionID"]
+        _job_log(jid, f"  → {fid} [{approach}/{mc.get('label', mc['model'])}]")
         attempt: dict = {
             "attempt_id": str(uuid.uuid4()),
             "file_id": fid,          # PRIVACY: no student identity here
