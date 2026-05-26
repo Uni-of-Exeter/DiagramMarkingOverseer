@@ -575,8 +575,12 @@ async function loadAttemptDetail() {
 
 async function openConfig() {
   try {
-    const cfg = await api('GET', '/api/config');
+    const [cfg, defs] = await Promise.all([
+      api('GET', '/api/config'),
+      api('GET', '/api/prompts/defaults'),
+    ]);
     state.config = cfg;
+    state.promptDefaults = defs;
     document.getElementById('cfg-data-root').value = cfg.data_root || '';
     document.getElementById('cfg-answer-sheets-root').value = cfg.answer_sheets_root || '';
     document.getElementById('cfg-aws-profile').value = cfg.aws_profile || '';
@@ -589,14 +593,14 @@ async function openConfig() {
     document.getElementById('cfg-skip').checked = cfg.skip_existing !== false;
     renderMarkingModels(cfg.marking_models || []);
     const p = cfg.prompts || {};
-    document.getElementById('cfg-prompt-student-id').value = p.student_id || '';
-    document.getElementById('cfg-prompt-header-mark').value = p.header_mark || '';
-    document.getElementById('cfg-prompt-qid').value = p.qid || '';
-    document.getElementById('cfg-prompt-body-mark').value = p.body_mark || '';
-    document.getElementById('cfg-prompt-oneshot').value = p.oneshot || '';
-    document.getElementById('cfg-prompt-twostep-extract').value = p.twostep_extract || '';
-    document.getElementById('cfg-prompt-twostep-mark').value = p.twostep_mark || '';
-    document.getElementById('cfg-prompt-answer-sheet-extract').value = p.answer_sheet_extract || '';
+    document.getElementById('cfg-prompt-student-id').value = p.student_id || defs.student_id || '';
+    document.getElementById('cfg-prompt-header-mark').value = p.header_mark || defs.header_mark || '';
+    document.getElementById('cfg-prompt-qid').value = p.qid || defs.qid || '';
+    document.getElementById('cfg-prompt-body-mark').value = p.body_mark || defs.body_mark || '';
+    document.getElementById('cfg-prompt-oneshot').value = p.oneshot || defs.oneshot || '';
+    document.getElementById('cfg-prompt-twostep-extract').value = p.twostep_extract || defs.twostep_extract || '';
+    document.getElementById('cfg-prompt-twostep-mark').value = p.twostep_mark || defs.twostep_mark || '';
+    document.getElementById('cfg-prompt-answer-sheet-extract').value = p.answer_sheet_extract || defs.answer_sheet_extract || '';
     document.getElementById('config-modal').classList.add('open');
     loadLogs();
   } catch (e) {
@@ -647,6 +651,12 @@ function removeMarkingModel(idx) {
   renderMarkingModels(current);
 }
 
+function _promptVal(id, defaultKey) {
+  const v = document.getElementById(id).value.trim();
+  const def = (state.promptDefaults || {})[defaultKey] || '';
+  return v === def ? '' : v;
+}
+
 async function saveConfig() {
   const cfg = {
     data_root: document.getElementById('cfg-data-root').value.trim(),
@@ -661,14 +671,14 @@ async function saveConfig() {
     skip_existing: document.getElementById('cfg-skip').checked,
     marking_models: gatherMarkingModels(),
     prompts: {
-      student_id: document.getElementById('cfg-prompt-student-id').value.trim(),
-      header_mark: document.getElementById('cfg-prompt-header-mark').value.trim(),
-      qid: document.getElementById('cfg-prompt-qid').value.trim(),
-      body_mark: document.getElementById('cfg-prompt-body-mark').value.trim(),
-      oneshot: document.getElementById('cfg-prompt-oneshot').value.trim(),
-      twostep_extract: document.getElementById('cfg-prompt-twostep-extract').value.trim(),
-      twostep_mark: document.getElementById('cfg-prompt-twostep-mark').value.trim(),
-      answer_sheet_extract: document.getElementById('cfg-prompt-answer-sheet-extract').value.trim(),
+      student_id: _promptVal('cfg-prompt-student-id', 'student_id'),
+      header_mark: _promptVal('cfg-prompt-header-mark', 'header_mark'),
+      qid: _promptVal('cfg-prompt-qid', 'qid'),
+      body_mark: _promptVal('cfg-prompt-body-mark', 'body_mark'),
+      oneshot: _promptVal('cfg-prompt-oneshot', 'oneshot'),
+      twostep_extract: _promptVal('cfg-prompt-twostep-extract', 'twostep_extract'),
+      twostep_mark: _promptVal('cfg-prompt-twostep-mark', 'twostep_mark'),
+      answer_sheet_extract: _promptVal('cfg-prompt-answer-sheet-extract', 'answer_sheet_extract'),
     },
   };
   try {

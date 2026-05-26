@@ -194,15 +194,16 @@ def _bedrock(model, messages, max_tokens, profile, region):
     client = _bedrock_client(profile, region)
     body = {"anthropic_version": "bedrock-2023-05-31", "max_tokens": max_tokens, "messages": messages}
     for attempt in range(3):
+        logger.info("Bedrock invoke [model=%s region=%s attempt=%d max_tokens=%d]", model, region, attempt + 1, max_tokens)
         try:
             resp = client.invoke_model(modelId=model, body=json.dumps(body))
             data = json.loads(resp["body"].read())
             usage = data.get("usage", {})
-            return {
-                "text": data["content"][0]["text"].strip(),
-                "input_tokens": usage.get("input_tokens", 0),
-                "output_tokens": usage.get("output_tokens", 0),
-            }
+            in_tok = usage.get("input_tokens", 0)
+            out_tok = usage.get("output_tokens", 0)
+            text = data["content"][0]["text"].strip()
+            logger.info("Bedrock ok [model=%s in=%d out=%d] response=%r", model, in_tok, out_tok, text[:200])
+            return {"text": text, "input_tokens": in_tok, "output_tokens": out_tok}
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
             msg = e.response.get("Error", {}).get("Message", str(e))
@@ -219,10 +220,13 @@ def _bedrock(model, messages, max_tokens, profile, region):
 
 def _anthropic(model, messages, max_tokens, api_key):
     client = _anthropic_client(api_key)
+    logger.info("Anthropic invoke [model=%s max_tokens=%d]", model, max_tokens)
     try:
         resp = client.messages.create(model=model, max_tokens=max_tokens, messages=messages)
+        text = resp.content[0].text.strip()
+        logger.info("Anthropic ok [model=%s in=%d out=%d] response=%r", model, resp.usage.input_tokens, resp.usage.output_tokens, text[:200])
         return {
-            "text": resp.content[0].text.strip(),
+            "text": text,
             "input_tokens": resp.usage.input_tokens,
             "output_tokens": resp.usage.output_tokens,
         }
@@ -256,6 +260,7 @@ def _parse_mark_json(text: str) -> tuple[str, str]:
         return "pass", text
     if re.search(r"\bfail\b", text, re.IGNORECASE):
         return "fail", text
+    logger.warning("Cannot parse pass/fail from AI response: %r", text[:500])
     return "error", text
 
 

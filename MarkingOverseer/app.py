@@ -37,9 +37,12 @@ _log_handler = RotatingFileHandler(
     _LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
 )
 _log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-_log_handler.setLevel(logging.WARNING)
+_log_handler.setLevel(logging.INFO)
 logging.getLogger().addHandler(_log_handler)
-logging.getLogger().setLevel(logging.WARNING)
+logging.getLogger().setLevel(logging.INFO)
+# Suppress chatty third-party loggers so only our scanner/app messages appear at INFO+
+for _noisy in ("werkzeug", "urllib3", "botocore", "boto3", "anthropic", "httpcore", "httpx"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -207,6 +210,20 @@ def api_save_config():
 def api_aws_check():
     ok, msg = check_aws(load_config())
     return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/api/prompts/defaults")
+def api_prompt_defaults():
+    return jsonify({
+        "student_id": scanner._STUDENT_ID_PROMPT,
+        "header_mark": scanner._HEADER_MARK_PROMPT,
+        "qid": scanner._QID_PROMPT,
+        "body_mark": scanner._BODY_MARK_PROMPT,
+        "oneshot": scanner._ONESHOT_PROMPT,
+        "twostep_extract": scanner._TWOSTEP_EXTRACT_PROMPT,
+        "twostep_mark": scanner._TWOSTEP_MARK_PROMPT,
+        "answer_sheet_extract": scanner._ANSWER_SHEET_EXTRACT_PROMPT,
+    })
 
 
 @app.route("/api/logs")
@@ -760,6 +777,9 @@ def api_ai_mark():
                 "cost_usd": mat.cost_estimate(mc["model"], result["input_tokens"], result["output_tokens"]),
             })
             _job_log(jid, f"  {fid} [{approach}/{mc.get('label', mc['model'])}]: {result['result']}")
+            if result["result"] == "error":
+                snippet = (result.get("raw_response") or "")[:200].replace("\n", " ")
+                _job_log(jid, f"    (raw: {snippet!r})")
             _job_tick(jid)
         except Exception as e:
             attempt["error"] = str(e)
