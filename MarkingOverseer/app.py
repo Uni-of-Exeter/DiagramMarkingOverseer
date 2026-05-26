@@ -77,7 +77,7 @@ _DEFAULTS: dict = {
         "oneshot": "",
         "twostep_extract": "",
         "twostep_mark": "",
-        "answer_sheet_extract": "",
+        "answer_sheet": "",
     },
 }
 
@@ -222,7 +222,7 @@ def api_prompt_defaults():
         "oneshot": scanner._ONESHOT_PROMPT,
         "twostep_extract": scanner._TWOSTEP_EXTRACT_PROMPT,
         "twostep_mark": scanner._TWOSTEP_MARK_PROMPT,
-        "answer_sheet_extract": scanner._ANSWER_SHEET_EXTRACT_PROMPT,
+        "answer_sheet": scanner._ANSWER_SHEET_MARK_PROMPT,
     })
 
 
@@ -760,8 +760,7 @@ def api_ai_mark():
                     raise FileNotFoundError(f"No answer PDF for QID {qid}")
                 result = scanner.ai_mark_answer_sheet(
                     answer_path.read_bytes(), body_bytes, **kwargs,
-                    extract_prompt=prompts.get("answer_sheet_extract") or None,
-                    mark_prompt=prompts.get("twostep_mark") or None,
+                    prompt=prompts.get("answer_sheet") or None,
                 )
             else:
                 raise ValueError(f"Unknown approach: {approach!r}")

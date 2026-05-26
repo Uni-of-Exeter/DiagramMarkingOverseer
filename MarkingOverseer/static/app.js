@@ -600,7 +600,7 @@ async function openConfig() {
     document.getElementById('cfg-prompt-oneshot').value = p.oneshot || defs.oneshot || '';
     document.getElementById('cfg-prompt-twostep-extract').value = p.twostep_extract || defs.twostep_extract || '';
     document.getElementById('cfg-prompt-twostep-mark').value = p.twostep_mark || defs.twostep_mark || '';
-    document.getElementById('cfg-prompt-answer-sheet-extract').value = p.answer_sheet_extract || defs.answer_sheet_extract || '';
+    document.getElementById('cfg-prompt-answer-sheet').value = p.answer_sheet || defs.answer_sheet || '';
     document.getElementById('config-modal').classList.add('open');
     loadLogs();
   } catch (e) {
@@ -678,7 +678,7 @@ async function saveConfig() {
       oneshot: _promptVal('cfg-prompt-oneshot', 'oneshot'),
       twostep_extract: _promptVal('cfg-prompt-twostep-extract', 'twostep_extract'),
       twostep_mark: _promptVal('cfg-prompt-twostep-mark', 'twostep_mark'),
-      answer_sheet_extract: _promptVal('cfg-prompt-answer-sheet-extract', 'answer_sheet_extract'),
+      answer_sheet: _promptVal('cfg-prompt-answer-sheet', 'answer_sheet'),
     },
   };
   try {

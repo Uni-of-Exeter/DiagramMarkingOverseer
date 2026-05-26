@@ -401,10 +401,14 @@ _TWOSTEP_MARK_PROMPT = (
     '{{"result": "pass" or "fail", "reasoning": "one sentence summary"}}'
 )
 
-_ANSWER_SHEET_EXTRACT_PROMPT = (
-    "You are looking at an official mathematics answer sheet for a specific question variant. "
-    "Extract and describe the complete correct answer with all numerical values, "
-    "algebraic expressions, steps, and notation needed to verify a student's response."
+_ANSWER_SHEET_MARK_PROMPT = (
+    "You have two documents. The first is the official answer sheet for a mathematics question. "
+    "The second is a student's worksheet showing their attempt at the same question.\n\n"
+    "Mark the student's work as pass if their answer is mathematically correct according to the "
+    "answer sheet, fail if it is not. Mathematical equivalence is sufficient — notation and layout "
+    "do not matter. Students may write corrections anywhere on the page.\n\n"
+    "Reason through your marking using the answer sheet, then finish your response with this JSON on its own line:\n"
+    '{"result": "pass" or "fail", "reasoning": "one sentence summary"}'
 )
 
 
@@ -524,32 +528,28 @@ def ai_mark_answer_sheet(
     aws_profile: str | None = None,
     aws_region: str = "eu-north-1",
     anthropic_api_key: str | None = None,
-    extract_prompt: str | None = None,
-    mark_prompt: str | None = None,
+    prompt: str | None = None,
 ) -> dict:
-    """Two calls: extract correct answer from answer sheet PDF, then mark student work."""
-    step1 = _call(
-        messages=[{"role": "user", "content": [_pdf(answer_pdf_bytes), _txt(extract_prompt or _ANSWER_SHEET_EXTRACT_PROMPT)]}],
-        max_tokens=600,
-        provider=provider, model=model,
-        aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
-    )
-    correct_answer = step1["text"]
+    """Single call: answer sheet + student worksheet → pass/fail.
 
-    step2 = _call(
+    Both PDFs are sent together so the model can directly compare the student's
+    work against the model answer without an intermediate extraction step.
+    """
+    resp = _call(
         messages=[{"role": "user", "content": [
+            _pdf(answer_pdf_bytes),
             _pdf(body_pdf_bytes),
-            _txt((mark_prompt or _TWOSTEP_MARK_PROMPT).format(correct_answer=correct_answer)),
+            _txt(prompt or _ANSWER_SHEET_MARK_PROMPT),
         ]}],
         max_tokens=8192,
         provider=provider, model=model,
         aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
     )
-    result, reasoning = _parse_mark_json(step2["text"])
+    result, reasoning = _parse_mark_json(resp["text"])
     return {
-        "result": result, "reasoning": reasoning, "raw_response": step2["text"],
-        "step1_result": correct_answer,
-        "input_tokens": step1["input_tokens"] + step2["input_tokens"],
-        "output_tokens": step1["output_tokens"] + step2["output_tokens"],
-        "latency_ms": step1["latency_ms"] + step2["latency_ms"],
+        "result": result, "reasoning": reasoning, "raw_response": resp["text"],
+        "step1_result": None,
+        "input_tokens": resp["input_tokens"],
+        "output_tokens": resp["output_tokens"],
+        "latency_ms": resp["latency_ms"],
     }
