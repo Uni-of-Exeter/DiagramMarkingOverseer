@@ -186,6 +186,7 @@ table.matrix tr:hover td{background:#161625}
           <select class="input" id="j1-questions" style="max-width:200px">
             <option value="">All questions</option>
           </select>
+          <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="j1-force"> <span class="text-sm">Overwrite existing</span></label>
           <button class="btn btn-primary btn-sm" id="j1-run" onclick="runJob('extract_headers','j1')">Run</button>
           <button class="btn btn-danger btn-sm" id="j1-stop" style="display:none" onclick="cancelJob('j1')">Stop</button>
         </div>
@@ -203,6 +204,7 @@ table.matrix tr:hover td{background:#161625}
           <select class="input" id="j2-questions" style="max-width:200px">
             <option value="">All questions</option>
           </select>
+          <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="j2-force"> <span class="text-sm">Overwrite existing</span></label>
           <button class="btn btn-primary btn-sm" id="j2-run" onclick="runJob('extract_bodies','j2')">Run</button>
           <button class="btn btn-danger btn-sm" id="j2-stop" style="display:none" onclick="cancelJob('j2')">Stop</button>
         </div>
@@ -220,6 +222,7 @@ table.matrix tr:hover td{background:#161625}
           <select class="input" id="j3-questions" style="max-width:200px">
             <option value="">All questions</option>
           </select>
+          <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="j3-force"> <span class="text-sm">Overwrite existing</span></label>
           <button class="btn btn-ghost btn-sm" id="j3-run" onclick="runJob('extract_human_marks','j3')">Run</button>
           <button class="btn btn-danger btn-sm" id="j3-stop" style="display:none" onclick="cancelJob('j3')">Stop</button>
         </div>

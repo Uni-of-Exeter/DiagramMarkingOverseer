@@ -497,12 +497,13 @@ def api_extract_headers():
 
     data = request.json or {}
     questions = data.get("questions") or store.list_questions(dr)
+    force = data.get("force", False)
     all_pdfs = [
         (q, p)
         for q in questions
         for p in sorted((Path(dr) / "header" / q).glob("header_scan_*.pdf"))
     ]
-    if cfg.get("skip_existing", True):
+    if cfg.get("skip_existing", True) and not force:
         all_pdfs = [
             (q, p) for q, p in all_pdfs
             if not any(
@@ -559,12 +560,13 @@ def api_extract_bodies():
 
     data = request.json or {}
     questions = data.get("questions") or store.list_questions(dr)
+    force = data.get("force", False)
     all_pdfs = [
         (q, p)
         for q in questions
         for p in sorted((Path(dr) / "body" / q).glob("body_scan_*.pdf"))
     ]
-    if cfg.get("skip_existing", True):
+    if cfg.get("skip_existing", True) and not force:
         all_pdfs = [
             (q, p) for q, p in all_pdfs
             if not store.read_scans(dr, "body", q).get(
@@ -617,12 +619,20 @@ def api_extract_human_marks():
 
     data = request.json or {}
     questions = data.get("questions") or store.list_questions(dr)
+    force = data.get("force", False)
     marked_root = cfg.get("marked_scans_root", "")
     all_pdfs = [
         (q, p)
         for q in questions
         for p in sorted((Path(dr) / "header" / q).glob("header_scan_*.pdf"))
     ]
+    if cfg.get("skip_existing", True) and not force:
+        all_pdfs = [
+            (q, p) for q, p in all_pdfs
+            if "human_mark_header" not in store.read_scans(dr, "header", q).get(
+                p.stem[len("header_scan_"):], {}
+            )
+        ]
 
     jid = _new_job("extract_human_marks", len(all_pdfs))
     _job_log(jid, f"Extracting TA marks from {len(all_pdfs)} header PDFs"

@@ -380,7 +380,9 @@ async function cancelJob(prefix) {
 async function runJob(endpoint, prefix) {
   const qSel = document.getElementById(prefix + '-questions');
   const q = qSel ? qSel.value : null;
+  const force = document.getElementById(prefix + '-force')?.checked || false;
   const body = q ? { questions: [q] } : {};
+  if (force) body.force = true;
 
   try {
     const r = await api('POST', `/api/jobs/${endpoint}`, body);
