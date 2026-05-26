@@ -311,6 +311,33 @@ table.matrix tr:hover td{background:#161625}
   </main>
 </div>
 
+<!-- Student Edit Modal -->
+<div class="modal-bg" id="student-edit-modal">
+  <div class="modal" style="max-width:520px">
+    <h2>Student Identity</h2>
+    <div id="se-header-img" style="text-align:center;margin-bottom:16px;min-height:60px"></div>
+    <div class="field">
+      <label>Name</label>
+      <input class="input" id="se-name" placeholder="Full name">
+    </div>
+    <div class="row" style="gap:12px;margin-bottom:14px">
+      <div class="field mb-0" style="flex:1">
+        <label>Student ID (9-digit)</label>
+        <input class="input" id="se-student-id" placeholder="123456789">
+      </div>
+      <div class="field mb-0" style="flex:1">
+        <label>Candidate Number (6-digit)</label>
+        <input class="input" id="se-candidate-number" placeholder="123456">
+      </div>
+    </div>
+    <div id="se-status" class="muted" style="min-height:18px;margin-bottom:10px;font-size:12px"></div>
+    <div class="row">
+      <button class="btn btn-primary" onclick="saveStudentIdentity()">Save</button>
+      <button class="btn btn-ghost" onclick="closeStudentEdit()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- Config Modal -->
 <div class="modal-bg" id="config-modal">
   <div class="modal">

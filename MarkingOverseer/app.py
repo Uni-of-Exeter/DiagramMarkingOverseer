@@ -401,6 +401,34 @@ def api_set_override(student_key, question):
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/scan/student/<student_key>/identity", methods=["POST"])
+def api_update_student_identity(student_key):
+    cfg = load_config()
+    dr = cfg.get("data_root", "")
+    if not dr:
+        return jsonify({"error": "data_root not set"}), 400
+
+    data = request.json or {}
+    sid_raw = (data.get("StudentID") or "").strip()
+    cnum_raw = (data.get("CandidateNumber") or "").strip()
+    name_raw = (data.get("Name") or "").strip()
+    fields = {
+        "StudentID": int(sid_raw) if sid_raw.isdigit() else None,
+        "CandidateNumber": int(cnum_raw) if cnum_raw.isdigit() else None,
+        "Name": name_raw or None,
+    }
+
+    updated = 0
+    for q in store.list_questions(dr):
+        scans = store.read_scans(dr, "header", q)
+        for fid, record in scans.items():
+            if mat.student_key({**record, "file_id": fid}) == student_key:
+                store.upsert_scan_field(dr, "header", q, fid, fields)
+                updated += 1
+
+    return jsonify({"status": "ok", "updated": updated})
+
+
 @app.route("/api/attempt/<attempt_id>/reject", methods=["POST"])
 def api_reject_attempt(attempt_id):
     cfg = load_config()

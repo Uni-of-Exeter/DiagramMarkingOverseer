@@ -59,6 +59,13 @@ function showView(name) {
   if (name === 'import') loadStudentList();
   if (name === 'stats') { loadStats(); loadAttemptDetail(); }
   if (name === 'jobs') populateJobSelects();
+  if (name === 'review') {
+    if (!state.matrix) {
+      loadMatrix().then(() => populateReviewSelects(state.reviewStudent, state.reviewQuestion));
+    } else {
+      populateReviewSelects(state.reviewStudent, state.reviewQuestion);
+    }
+  }
 }
 
 // ── Matrix view ───────────────────────────────────────────────────────────────
@@ -105,18 +112,29 @@ function renderMatrix(data) {
   for (const s of students) {
     html += `<tr>`;
     html += `<td>
-      <div style="font-weight:600;font-size:13px">${esc(s.display_name)}</div>
-      <div class="muted">${s.StudentID || s.CandidateNumber || ''}</div>
+      <button class="matrix-cell-btn" style="text-align:left;padding:4px 2px;width:auto" onclick="openStudentEdit('${esc(s.student_key)}')">
+        <div style="font-weight:600;font-size:13px">${esc(s.display_name)}</div>
+        <div class="muted">${esc(String(s.StudentID || s.CandidateNumber || ''))}</div>
+      </button>
     </td>`;
 
     for (const q of questions) {
       const status = s.question_status[q] || 'not_attempted';
       const files = (s.question_files[q] || []);
       const conflicts = files.some(f => f.human_mark_conflict);
+      // Check AI vs TA disagreement
+      let aiTaConflict = false;
+      for (const f of files) {
+        if (!f.human_mark_header) continue;
+        if (f.attempts.some(a => !a.rejected && a.result && a.result !== 'error' && a.result !== f.human_mark_header)) {
+          aiTaConflict = true; break;
+        }
+      }
       html += `<td style="text-align:center">
         <button class="matrix-cell-btn" onclick="openReview('${esc(s.student_key)}','${q}')">
           ${chip(status)}
           ${conflicts ? '<span class="tag-conflict" title="Human mark conflict">⚠</span>' : ''}
+          ${aiTaConflict ? '<span style="font-size:10px;color:#fcc419" title="AI/TA disagreement">⚡</span>' : ''}
         </button>
       </td>`;
     }
@@ -255,6 +273,27 @@ function renderFileRecord(fr, studentKey, question) {
     <span>TA mark (header): ${fr.human_mark_header ? chip(fr.human_mark_header) : '<span class="muted">none</span>'}</span>
     ${fr.human_mark_conflict ? '<span class="tag-conflict">⚠ Conflict</span>' : ''}
   </div>`;
+
+  // Model comparison
+  const markEntries = {};
+  if (fr.human_mark_header) markEntries['TA'] = fr.human_mark_header;
+  for (const a of [...fr.attempts].reverse()) {
+    if (a.rejected || !a.result || a.result === 'error') continue;
+    const key = `${esc(a.model_label || a.model)} (${esc(a.ai_approach)})`;
+    if (!markEntries[key]) markEntries[key] = a.result;
+  }
+  if (Object.keys(markEntries).length > 0) {
+    const vals = Object.values(markEntries);
+    const unanimous = vals.length > 1 && vals.every(r => r === vals[0]);
+    const hasConflict = vals.length > 1 && !unanimous;
+    html += `<div style="background:${hasConflict ? '#2a1a1a' : '#0f0f1a'};border:1px solid ${hasConflict ? '#7a2a2a' : '#2a2a3e'};border-radius:6px;padding:10px;margin-bottom:12px">
+      <div class="muted" style="font-size:11px;margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">${hasConflict ? '⚡ Disagreement' : 'Model Agreement'}</div>
+      <div class="row" style="flex-wrap:wrap;gap:10px">`;
+    for (const [label, result] of Object.entries(markEntries)) {
+      html += `<span class="text-sm"><span style="color:#888">${label}:</span> ${chip(result)}</span>`;
+    }
+    html += `</div></div>`;
+  }
 
   // Images
   html += `<div class="review-grid" style="margin-bottom:14px">
@@ -730,6 +769,67 @@ function closeConfig() {
 // Close modal on background click
 document.getElementById('config-modal').addEventListener('click', function(e) {
   if (e.target === this) closeConfig();
+});
+
+// ── Student identity edit ─────────────────────────────────────────────────────
+
+let _editStudentKey = null;
+
+function openStudentEdit(studentKey) {
+  const s = state.matrix?.students.find(s => s.student_key === studentKey);
+  if (!s) return;
+  _editStudentKey = studentKey;
+
+  document.getElementById('se-name').value = s.Name || '';
+  document.getElementById('se-student-id').value = s.StudentID || '';
+  document.getElementById('se-candidate-number').value = s.CandidateNumber || '';
+  document.getElementById('se-status').textContent = '';
+
+  const imgEl = document.getElementById('se-header-img');
+  const questions = Object.keys(s.question_files || {});
+  const firstFiles = questions.length ? (s.question_files[questions[0]] || []) : [];
+  if (firstFiles.length) {
+    const q = questions[0];
+    const fid = firstFiles[0].file_id;
+    imgEl.innerHTML = `<img src="/pdf/header/${q}/${encodeURIComponent(fid)}/image"
+      style="max-width:100%;max-height:280px;border-radius:6px;border:1px solid #2a2a3e"
+      onerror="this.outerHTML='<div class=empty style=padding:24px>Header image not available</div>'">`;
+  } else {
+    imgEl.innerHTML = '<div class="muted" style="padding:12px;text-align:center">No header scan found</div>';
+  }
+
+  document.getElementById('student-edit-modal').classList.add('open');
+}
+
+function closeStudentEdit() {
+  document.getElementById('student-edit-modal').classList.remove('open');
+  _editStudentKey = null;
+}
+
+async function saveStudentIdentity() {
+  if (!_editStudentKey) return;
+  const payload = {
+    Name: document.getElementById('se-name').value.trim(),
+    StudentID: document.getElementById('se-student-id').value.trim(),
+    CandidateNumber: document.getElementById('se-candidate-number').value.trim(),
+  };
+  const st = document.getElementById('se-status');
+  st.textContent = 'Saving…';
+  st.style.color = '#888';
+  try {
+    const r = await api('POST', `/api/scan/student/${encodeURIComponent(_editStudentKey)}/identity`, payload);
+    st.textContent = `✓ Updated ${r.updated} scan record(s)`;
+    st.style.color = '#51cf66';
+    await loadMatrix();
+  } catch (e) {
+    st.textContent = 'Error: ' + e.message;
+    st.style.color = '#ff6b6b';
+  }
+}
+
+// Close on background click
+document.getElementById('student-edit-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeStudentEdit();
 });
 
 // ── XSS-safe escape ───────────────────────────────────────────────────────────
