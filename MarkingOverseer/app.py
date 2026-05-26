@@ -945,49 +945,45 @@ def api_attempts_detail():
 
 @app.route("/api/migrate/prompt_hashes", methods=["POST"])
 def api_migrate_prompt_hashes():
-    """Backfill prompt_hash on existing attempts that lack one, using current config.
+    """Backfill prompt_hash on attempts that lack one using the built-in default prompts.
 
+    Pre-hash-feature attempts were all run with defaults, so they get the default hash.
     Idempotent — only touches attempts where prompt_hash is absent.
-    Also records the current prompts in prompt_history so they are discoverable.
     """
     cfg = load_config()
     dr = cfg.get("data_root", "")
     if not dr:
         return jsonify({"status": "ok", "updated": 0})
 
-    prompts = cfg.get("prompts", {})
-
-    def _eff(key):
-        return prompts.get(key) or _PROMPT_DEFAULTS.get(key, "")
-
-    approach_hashes = {
-        "oneshot": _prompt_hash(_eff("oneshot")),
-        "twostep": _prompt_hash(_eff("twostep_extract") + "|" + _eff("twostep_mark")),
-        "answer_sheet": _prompt_hash(_eff("answer_sheet")),
+    # Always use hardcoded defaults — these are what pre-hash attempts were run with.
+    default_hashes = {
+        "oneshot": _prompt_hash(_PROMPT_DEFAULTS["oneshot"]),
+        "twostep": _prompt_hash(
+            _PROMPT_DEFAULTS["twostep_extract"] + "|" + _PROMPT_DEFAULTS["twostep_mark"]
+        ),
+        "answer_sheet": _prompt_hash(_PROMPT_DEFAULTS["answer_sheet"]),
     }
 
     history = cfg.get("prompt_history", {})
-    for ap, h in approach_hashes.items():
-        if h not in history:
-            if ap == "oneshot":
-                recs = [("oneshot", _eff("oneshot"))]
-            elif ap == "twostep":
-                recs = [
-                    ("twostep_extract", _eff("twostep_extract")),
-                    ("twostep_mark", _eff("twostep_mark")),
-                ]
-            else:
-                recs = [("answer_sheet", _eff("answer_sheet"))]
-            for key, text in recs:
-                hh = _prompt_hash(text) if text else None
-                if hh and hh not in history:
-                    history[hh] = {"key": key, "text": text, "saved_at": datetime.now().isoformat()}
+    default_prompt_map = {
+        "oneshot": [("oneshot", _PROMPT_DEFAULTS["oneshot"])],
+        "twostep": [
+            ("twostep_extract", _PROMPT_DEFAULTS["twostep_extract"]),
+            ("twostep_mark", _PROMPT_DEFAULTS["twostep_mark"]),
+        ],
+        "answer_sheet": [("answer_sheet", _PROMPT_DEFAULTS["answer_sheet"])],
+    }
+    for ap, recs in default_prompt_map.items():
+        for key, text in recs:
+            hh = _prompt_hash(text) if text else None
+            if hh and hh not in history:
+                history[hh] = {"key": key, "text": text, "saved_at": "default"}
 
     attempts = store.read_attempts(dr)
     updated = 0
     for a in attempts:
-        if not a.get("prompt_hash") and a.get("ai_approach") in approach_hashes:
-            a["prompt_hash"] = approach_hashes[a["ai_approach"]]
+        if not a.get("prompt_hash") and a.get("ai_approach") in default_hashes:
+            a["prompt_hash"] = default_hashes[a["ai_approach"]]
             updated += 1
 
     if updated:
