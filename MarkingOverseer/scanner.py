@@ -212,39 +212,12 @@ def _to_converse_content(content: list[dict]) -> list[dict]:
 
 
 def _bedrock(model, messages, max_tokens, profile, region):
-    # Anthropic models on Bedrock use the Anthropic Messages API via invoke_model.
-    # All other models (Nova, Titan, Llama, Mistral…) use the Converse API which
-    # handles format differences automatically — no recoding needed per model family.
-    if "anthropic" not in model.lower():
-        return _bedrock_converse(model, messages, max_tokens, profile, region)
-
-    from botocore.exceptions import ClientError
-
-    client = _bedrock_client(profile, region)
-    body = {"anthropic_version": "bedrock-2023-05-31", "max_tokens": max_tokens, "messages": messages}
-    for attempt in range(3):
-        logger.info("Bedrock invoke [model=%s region=%s attempt=%d max_tokens=%d]", model, region, attempt + 1, max_tokens)
-        try:
-            resp = client.invoke_model(modelId=model, body=json.dumps(body))
-            data = json.loads(resp["body"].read())
-            usage = data.get("usage", {})
-            in_tok = usage.get("input_tokens", 0)
-            out_tok = usage.get("output_tokens", 0)
-            text = data["content"][0]["text"].strip()
-            logger.info("Bedrock ok [model=%s in=%d out=%d] response=%r", model, in_tok, out_tok, text[:200])
-            return {"text": text, "input_tokens": in_tok, "output_tokens": out_tok}
-        except ClientError as e:
-            code = e.response.get("Error", {}).get("Code", "")
-            msg = e.response.get("Error", {}).get("Message", str(e))
-            if code in ("ThrottlingException", "ServiceUnavailableException") and attempt < 2:
-                logger.warning("Bedrock throttle [model=%s region=%s attempt=%d]: %s", model, region, attempt + 1, msg)
-                time.sleep(2 ** attempt)
-                continue
-            logger.error("Bedrock error [model=%s region=%s]: %s %s", model, region, code, msg)
-            raise
-        except Exception as e:
-            logger.error("Bedrock error [model=%s region=%s]: %s: %s", model, region, type(e).__name__, e)
-            raise
+    # All Bedrock models use the Converse API. The Converse API transmits document
+    # and image content as raw bytes rather than base64-inside-JSON, avoiding the
+    # invoke_model 20 MB body limit that causes "malformed JSON" errors when sending
+    # two large PDFs (answer_sheet approach). It is also model-agnostic, so no
+    # recoding is needed when adding new model families.
+    return _bedrock_converse(model, messages, max_tokens, profile, region)
 
 
 def _bedrock_converse(model, messages, max_tokens, profile, region):
