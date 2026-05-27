@@ -432,6 +432,18 @@ async function loadMarkingModels() {
   } catch (_) {}
 }
 
+function _savedModelIds() {
+  try { return new Set(JSON.parse(localStorage.getItem('j4-selected-models') || 'null') || []); }
+  catch (_) { return null; }
+}
+
+function _saveModelIds() {
+  const ids = (state.markingModels || [])
+    .filter((m, i) => document.getElementById(`j4-model-${i}`)?.checked)
+    .map(m => m.model);
+  localStorage.setItem('j4-selected-models', JSON.stringify(ids));
+}
+
 function renderMarkingModelCheckboxes(models) {
   const list = document.getElementById('j4-models-list');
   if (!list) return;
@@ -439,12 +451,14 @@ function renderMarkingModelCheckboxes(models) {
     list.innerHTML = '<span class="muted text-sm">No models configured — add models in Config</span>';
     return;
   }
-  list.innerHTML = models.map((m, i) =>
-    `<label class="row" style="gap:4px;cursor:pointer">
-      <input type="checkbox" id="j4-model-${i}" ${m.enabled !== false ? 'checked' : ''}>
+  const saved = _savedModelIds();
+  list.innerHTML = models.map((m, i) => {
+    const checked = saved && saved.size ? saved.has(m.model) : m.enabled !== false;
+    return `<label class="row" style="gap:4px;cursor:pointer">
+      <input type="checkbox" id="j4-model-${i}" ${checked ? 'checked' : ''} onchange="_saveModelIds()">
       <span class="text-sm">${esc(m.label || m.model)}</span>
-    </label>`
-  ).join('');
+    </label>`;
+  }).join('');
 }
 
 function _jobStarted(prefix, jid) {

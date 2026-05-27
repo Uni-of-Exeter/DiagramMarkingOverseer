@@ -254,12 +254,12 @@ table.matrix tr:hover td{background:#161625}
               <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="a-answer_sheet"> <span class="text-sm">Answer-sheet</span></label>
             </div>
           </div>
-          <label class="row" style="gap:4px;cursor:pointer;margin-top:8px">
+        </div>
+        <div class="row">
+          <label class="row" style="gap:4px;cursor:pointer">
             <input type="checkbox" id="j4-skip" checked>
             <span class="text-sm">Skip already-marked</span>
           </label>
-        </div>
-        <div class="row">
           <button class="btn btn-success btn-sm" id="j4-run" onclick="runAiMark()">Run AI Marking</button>
           <button class="btn btn-danger btn-sm" id="j4-stop" style="display:none" onclick="cancelJob('j4')">Stop</button>
         </div>
