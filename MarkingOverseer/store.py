@@ -122,11 +122,14 @@ def get_answer_pdf(data_root: str, question: str, qid: str, answer_sheets_root: 
     """
     qid_lower = qid.lower()
     if answer_sheets_root:
-        answer_dir = Path(answer_sheets_root) / question
-        if answer_dir.exists():
-            for pdf in answer_dir.glob("*.pdf"):
-                if qid_lower in pdf.stem.lower():
-                    return pdf
+        for search_dir in (
+            Path(answer_sheets_root) / question,  # per-question subfolder
+            Path(answer_sheets_root),              # flat root
+        ):
+            if search_dir.exists():
+                for pdf in search_dir.glob("*.pdf"):
+                    if qid_lower in pdf.stem.lower():
+                        return pdf
     body_dir = Path(data_root) / "body" / question
     if not body_dir.exists():
         return None
