@@ -613,59 +613,171 @@ async function loadStudentList() {
 
 // ── Stats view ────────────────────────────────────────────────────────────────
 
+let _statsData = null;
+let _statsSort = { col: null, dir: 1 };
+
+const _STATS_COLS = [
+  { key: 'label',           label: 'Model / Approach' },
+  { key: 'count',           label: 'Count' },
+  { key: 'pass',            label: 'Pass' },
+  { key: 'fail',            label: 'Fail' },
+  { key: 'error',           label: 'Error' },
+  { key: 'pass_rate',       label: 'Pass rate' },
+  { key: 'avg_latency_ms',  label: 'Avg latency' },
+  { key: 'avg_cost_usd',    label: 'Avg cost' },
+  { key: 'total_cost_usd',  label: 'Total cost' },
+  { key: 'prompt_hash',     label: 'Prompt' },
+  { key: 'ta_correlation',  label: 'TA Corr.' },
+  { key: 'false_positives', label: 'FP', title: 'False positives: AI=Pass, TA=Fail' },
+  { key: 'false_negatives', label: 'FN', title: 'False negatives: AI=Fail, TA=Pass' },
+];
+
+function onStatsSortClick(col) {
+  _statsSort = _statsSort.col === col
+    ? { col, dir: _statsSort.dir * -1 }
+    : { col, dir: 1 };
+  if (_statsData) _renderStatsTable(document.getElementById('stats-summary'), _statsData);
+}
+
+function _renderStatsTable(el, data) {
+  const { col, dir } = _statsSort;
+  const sorted = col ? [...data].sort((a, b) => {
+    const av = a[col] ?? null, bv = b[col] ?? null;
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    return av < bv ? -dir : av > bv ? dir : 0;
+  }) : data;
+
+  let html = '<table class="stats-table"><thead><tr>';
+  for (const c of _STATS_COLS) {
+    const active = col === c.key;
+    const arrow = active ? (dir === 1 ? ' ↑' : ' ↓') : '';
+    const titleAttr = c.title ? ` title="${c.title}"` : '';
+    html += `<th style="cursor:pointer;user-select:none${active ? ';color:#7ecfff' : ''}"
+      onclick="onStatsSortClick('${c.key}')"${titleAttr}>${c.label}${arrow}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const g of sorted) {
+    const fp = g.false_positives || 0;
+    const fn = g.false_negatives || 0;
+    const fpCell = fp > 0
+      ? `<button class="btn btn-ghost btn-sm" style="color:#fcc419;padding:2px 6px"
+          data-model="${esc(g.model_label || g.label)}"
+          data-approach="${esc(g.approach)}"
+          data-prompt="${esc(g.prompt_hash || '')}"
+          data-type="fp"
+          onclick="event.stopPropagation();showDisagreements(this)">${fp}</button>`
+      : `<span class="muted">${fp}</span>`;
+    const fnCell = fn > 0
+      ? `<button class="btn btn-ghost btn-sm" style="color:#fcc419;padding:2px 6px"
+          data-model="${esc(g.model_label || g.label)}"
+          data-approach="${esc(g.approach)}"
+          data-prompt="${esc(g.prompt_hash || '')}"
+          data-type="fn"
+          onclick="event.stopPropagation();showDisagreements(this)">${fn}</button>`
+      : `<span class="muted">${fn}</span>`;
+    html += `<tr>
+      <td><strong>${esc(g.label)}</strong></td>
+      <td>${g.count}</td>
+      <td style="color:#51cf66">${g.pass || 0}</td>
+      <td style="color:#ff6b6b">${g.fail || 0}</td>
+      <td style="color:#888">${g.error || 0}</td>
+      <td>${(g.pass_rate * 100).toFixed(1)}%</td>
+      <td>${fmtMs(g.avg_latency_ms)}</td>
+      <td>${fmtCost(g.avg_cost_usd)}</td>
+      <td>${fmtCost(g.total_cost_usd)}</td>
+      <td>${g.prompt_hash ? `<span class="badge" style="cursor:pointer;font-family:monospace" onclick="event.stopPropagation();showPromptPopup('${g.prompt_hash}')">${g.prompt_hash.slice(0,6)}</span>` : '<span class="muted">—</span>'}</td>
+      <td>${g.ta_correlation != null ? `${(g.ta_correlation * 100).toFixed(1)}% (${g.ta_agree}/${g.ta_total})` : '<span class="muted">—</span>'}</td>
+      <td>${fpCell}</td>
+      <td>${fnCell}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
 async function loadStats() {
   const el = document.getElementById('stats-summary');
   try {
     const stats = await api('GET', '/api/stats/attempts');
-    if (!stats.length) {
-      el.innerHTML = '<div class="empty">No attempts yet.</div>';
-      return;
-    }
-    let html = '<table class="stats-table"><thead><tr>';
-    html += '<th>Model / Approach</th><th>Count</th><th>Pass</th><th>Fail</th><th>Error</th>';
-    html += '<th>Pass rate</th><th>Avg latency</th><th>Avg cost</th><th>Total cost</th>';
-    html += '<th>Prompt</th><th>TA Corr.</th><th title="False positives: AI=Pass, TA=Fail">FP</th><th title="False negatives: AI=Fail, TA=Pass">FN</th>';
-    html += '</tr></thead><tbody>';
-    for (const g of stats) {
-      const fp = g.false_positives || 0;
-      const fn = g.false_negatives || 0;
-      const fpCell = fp > 0
-        ? `<button class="btn btn-ghost btn-sm" style="color:#fcc419;padding:2px 6px"
-            data-model="${esc(g.model_label || g.label)}"
-            data-approach="${esc(g.approach)}"
-            data-prompt="${esc(g.prompt_hash || '')}"
-            data-type="fp"
-            onclick="showDisagreements(this)">${fp}</button>`
-        : `<span class="muted">${fp}</span>`;
-      const fnCell = fn > 0
-        ? `<button class="btn btn-ghost btn-sm" style="color:#fcc419;padding:2px 6px"
-            data-model="${esc(g.model_label || g.label)}"
-            data-approach="${esc(g.approach)}"
-            data-prompt="${esc(g.prompt_hash || '')}"
-            data-type="fn"
-            onclick="showDisagreements(this)">${fn}</button>`
-        : `<span class="muted">${fn}</span>`;
-      html += `<tr>
-        <td><strong>${esc(g.label)}</strong></td>
-        <td>${g.count}</td>
-        <td style="color:#51cf66">${g.pass || 0}</td>
-        <td style="color:#ff6b6b">${g.fail || 0}</td>
-        <td style="color:#888">${g.error || 0}</td>
-        <td>${(g.pass_rate * 100).toFixed(1)}%</td>
-        <td>${fmtMs(g.avg_latency_ms)}</td>
-        <td>${fmtCost(g.avg_cost_usd)}</td>
-        <td>${fmtCost(g.total_cost_usd)}</td>
-        <td>${g.prompt_hash ? `<span class="badge" style="cursor:pointer;font-family:monospace" onclick="showPromptPopup('${g.prompt_hash}')">${g.prompt_hash.slice(0,6)}</span>` : '<span class="muted">—</span>'}</td>
-        <td>${g.ta_correlation != null ? `${(g.ta_correlation * 100).toFixed(1)}% (${g.ta_agree}/${g.ta_total})` : '<span class="muted">—</span>'}</td>
-        <td>${fpCell}</td>
-        <td>${fnCell}</td>
-      </tr>`;
-    }
-    html += '</tbody></table>';
-    el.innerHTML = html;
+    if (!stats.length) { el.innerHTML = '<div class="empty">No attempts yet.</div>'; return; }
+    _statsData = stats;
+    _renderStatsTable(el, stats);
   } catch (e) {
     el.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
   }
+}
+
+let _attemptDetailData = null;
+let _expandedAttemptIdx = null;
+
+function _renderAttemptDetailTable(el) {
+  const data = _attemptDetailData;
+  if (!data || !data.length) {
+    el.innerHTML = '<div class="empty">No attempts match filter.</div>';
+    return;
+  }
+  let html = '<table class="stats-table"><thead><tr>';
+  html += '<th>Time</th><th>File</th><th>QID</th><th>Q</th><th>Approach</th><th>Model</th>';
+  html += '<th>Result</th><th>Latency</th><th>Cost</th><th>Rejected</th>';
+  html += '</tr></thead><tbody>';
+  for (let i = 0; i < data.length; i++) {
+    const a = data[i];
+    const ts = a.timestamp ? a.timestamp.slice(0, 19).replace('T', ' ') : '—';
+    const expanded = _expandedAttemptIdx === i;
+    html += `<tr style="cursor:pointer${expanded ? ';background:#131320' : ''}"
+      onclick="toggleAttemptDetail(${i})" title="Click to ${expanded ? 'collapse' : 'expand'} details">
+      <td>${esc(ts)}</td>
+      <td><code style="font-size:11px">${esc((a.file_id || '').slice(0, 10))}</code></td>
+      <td><code style="font-size:11px">${esc(a.question_id || '—')}</code></td>
+      <td>${esc(a.question || '—')}</td>
+      <td>${esc(a.ai_approach || '—')}</td>
+      <td>${esc(a.model_label || a.model || '—')}</td>
+      <td>${a.result ? chip(a.result) : '<span class="muted">—</span>'}</td>
+      <td>${fmtMs(a.latency_ms || 0)}</td>
+      <td>${fmtCost(a.cost_usd || 0)}</td>
+      <td>${a.rejected ? '✕' : ''}</td>
+    </tr>`;
+    if (expanded) {
+      html += `<tr><td colspan="10" style="padding:0">
+        <div style="background:#0f0f1a;border-left:3px solid #7ecfff;padding:14px 16px;font-size:12px">
+        <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:10px;color:#888">
+          <span>ID: <code style="color:#aaa">${esc(a.attempt_id || '—')}</code></span>
+          <span>${a.input_tokens || 0} in + ${a.output_tokens || 0} out tokens</span>
+          ${a.prompt_hash ? `<span>Prompt: <span class="badge" style="cursor:pointer;font-family:monospace" onclick="event.stopPropagation();showPromptPopup('${esc(a.prompt_hash)}')">${esc(a.prompt_hash.slice(0,6))}</span></span>` : ''}
+          ${a.rejected ? '<span style="color:#ff6b6b">REJECTED</span>' : ''}
+        </div>`;
+      if (a.error) {
+        html += `<div style="color:#ff6b6b;margin-bottom:8px">Error: ${esc(a.error)}</div>`;
+      }
+      if (a.step1_result) {
+        html += `<div class="muted" style="margin-bottom:4px">Step 1 extraction:</div>
+          <pre style="background:#161625;padding:8px 10px;border-radius:4px;white-space:pre-wrap;word-break:break-word;margin-bottom:10px;max-height:120px;overflow-y:auto;color:#e0e0e0">${esc(a.step1_result)}</pre>`;
+      }
+      if (a.reasoning) {
+        html += `<div class="muted" style="margin-bottom:4px">Reasoning:</div>
+          <pre style="background:#161625;padding:8px 10px;border-radius:4px;white-space:pre-wrap;word-break:break-word;margin-bottom:10px;max-height:180px;overflow-y:auto;color:#e0e0e0">${esc(a.reasoning)}</pre>`;
+      }
+      if (a.raw_response) {
+        html += `<div class="muted" style="margin-bottom:4px">Raw response:</div>
+          <pre style="background:#161625;padding:8px 10px;border-radius:4px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;color:#c0c0c0;font-size:11px">${esc(a.raw_response)}</pre>`;
+      }
+      if (!a.error && !a.reasoning && !a.raw_response && !a.step1_result) {
+        html += '<div class="muted">No additional details available.</div>';
+      }
+      html += `</div></td></tr>`;
+    }
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+function toggleAttemptDetail(idx) {
+  _expandedAttemptIdx = _expandedAttemptIdx === idx ? null : idx;
+  const el = document.getElementById('stats-detail');
+  if (el) _renderAttemptDetailTable(el);
 }
 
 async function loadAttemptDetail() {
@@ -678,31 +790,9 @@ async function loadAttemptDetail() {
   if (ap) params.set('ai_approach', ap);
   try {
     const attempts = await api('GET', '/api/stats/attempts/detail?' + params);
-    if (!attempts.length) {
-      el.innerHTML = '<div class="empty">No attempts match filter.</div>';
-      return;
-    }
-    let html = '<table class="stats-table"><thead><tr>';
-    html += '<th>Time</th><th>File</th><th>QID</th><th>Q</th><th>Approach</th><th>Model</th>';
-    html += '<th>Result</th><th>Latency</th><th>Cost</th><th>Rejected</th>';
-    html += '</tr></thead><tbody>';
-    for (const a of [...attempts].reverse()) {
-      const ts = a.timestamp ? a.timestamp.slice(0, 19).replace('T', ' ') : '—';
-      html += `<tr>
-        <td>${esc(ts)}</td>
-        <td><code style="font-size:11px">${esc((a.file_id || '').slice(0, 10))}</code></td>
-        <td><code style="font-size:11px">${esc(a.question_id || '—')}</code></td>
-        <td>${esc(a.question || '—')}</td>
-        <td>${esc(a.ai_approach || '—')}</td>
-        <td>${esc(a.model_label || a.model || '—')}</td>
-        <td>${a.result ? chip(a.result) : '<span class="muted">—</span>'}</td>
-        <td>${fmtMs(a.latency_ms || 0)}</td>
-        <td>${fmtCost(a.cost_usd || 0)}</td>
-        <td>${a.rejected ? '✕' : ''}</td>
-      </tr>`;
-    }
-    html += '</tbody></table>';
-    el.innerHTML = html;
+    _attemptDetailData = [...attempts].reverse();
+    _expandedAttemptIdx = null;
+    _renderAttemptDetailTable(el);
   } catch (e) {
     el.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
   }
