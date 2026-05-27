@@ -191,6 +191,7 @@ def _call(
 def _to_converse_content(content: list[dict]) -> list[dict]:
     """Translate Anthropic Messages-format content blocks to Bedrock Converse format."""
     out = []
+    doc_idx = 0
     for block in content:
         t = block.get("type")
         if t == "text":
@@ -205,7 +206,8 @@ def _to_converse_content(content: list[dict]) -> list[dict]:
             src = block["source"]
             if src.get("type") == "base64":
                 raw = base64.standard_b64decode(src["data"])
-                out.append({"document": {"format": "pdf", "name": "document", "source": {"bytes": raw}}})
+                doc_idx += 1
+                out.append({"document": {"format": "pdf", "name": f"document-{doc_idx}", "source": {"bytes": raw}}})
     return out
 
 
