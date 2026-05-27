@@ -193,6 +193,7 @@ def attempt_stats(attempts: list[dict], records: dict | None = None) -> list[dic
                 "total_input_tokens": 0, "total_output_tokens": 0,
                 "total_cost_usd": 0.0, "total_latency_ms": 0,
                 "ta_agree": 0, "ta_total": 0,
+                "false_positives": 0, "false_negatives": 0,
             }
         g = groups[key]
         g["count"] += 1
@@ -207,6 +208,10 @@ def attempt_stats(attempts: list[dict], records: dict | None = None) -> list[dic
                 g["ta_total"] += 1
                 if human == a.get("result"):
                     g["ta_agree"] += 1
+                elif a.get("result") == "pass" and human == "fail":
+                    g["false_positives"] += 1
+                elif a.get("result") == "fail" and human == "pass":
+                    g["false_negatives"] += 1
 
     for g in groups.values():
         n = g["count"]

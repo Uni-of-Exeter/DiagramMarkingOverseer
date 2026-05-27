@@ -624,9 +624,27 @@ async function loadStats() {
     let html = '<table class="stats-table"><thead><tr>';
     html += '<th>Model / Approach</th><th>Count</th><th>Pass</th><th>Fail</th><th>Error</th>';
     html += '<th>Pass rate</th><th>Avg latency</th><th>Avg cost</th><th>Total cost</th>';
-    html += '<th>Prompt</th><th>TA Corr.</th>';
+    html += '<th>Prompt</th><th>TA Corr.</th><th title="False positives: AI=Pass, TA=Fail">FP</th><th title="False negatives: AI=Fail, TA=Pass">FN</th>';
     html += '</tr></thead><tbody>';
     for (const g of stats) {
+      const fp = g.false_positives || 0;
+      const fn = g.false_negatives || 0;
+      const fpCell = fp > 0
+        ? `<button class="btn btn-ghost btn-sm" style="color:#fcc419;padding:2px 6px"
+            data-model="${esc(g.model_label || g.label)}"
+            data-approach="${esc(g.approach)}"
+            data-prompt="${esc(g.prompt_hash || '')}"
+            data-type="fp"
+            onclick="showDisagreements(this)">${fp}</button>`
+        : `<span class="muted">${fp}</span>`;
+      const fnCell = fn > 0
+        ? `<button class="btn btn-ghost btn-sm" style="color:#fcc419;padding:2px 6px"
+            data-model="${esc(g.model_label || g.label)}"
+            data-approach="${esc(g.approach)}"
+            data-prompt="${esc(g.prompt_hash || '')}"
+            data-type="fn"
+            onclick="showDisagreements(this)">${fn}</button>`
+        : `<span class="muted">${fn}</span>`;
       html += `<tr>
         <td><strong>${esc(g.label)}</strong></td>
         <td>${g.count}</td>
@@ -639,6 +657,8 @@ async function loadStats() {
         <td>${fmtCost(g.total_cost_usd)}</td>
         <td>${g.prompt_hash ? `<span class="badge" style="cursor:pointer;font-family:monospace" onclick="showPromptPopup('${g.prompt_hash}')">${g.prompt_hash.slice(0,6)}</span>` : '<span class="muted">—</span>'}</td>
         <td>${g.ta_correlation != null ? `${(g.ta_correlation * 100).toFixed(1)}% (${g.ta_agree}/${g.ta_total})` : '<span class="muted">—</span>'}</td>
+        <td>${fpCell}</td>
+        <td>${fnCell}</td>
       </tr>`;
     }
     html += '</tbody></table>';
@@ -686,6 +706,70 @@ async function loadAttemptDetail() {
   } catch (e) {
     el.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
   }
+}
+
+async function showDisagreements(btn) {
+  const modelLabel = btn.dataset.model;
+  const approach = btn.dataset.approach;
+  const promptHash = btn.dataset.prompt;
+  const type = btn.dataset.type;
+  const typeLabel = type === 'fp'
+    ? 'False Positives — AI said Pass, TA said Fail'
+    : 'False Negatives — AI said Fail, TA said Pass';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'disagreements-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:2000;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `<div style="background:#161625;border:1px solid #2a2a3e;border-radius:10px;padding:20px;max-width:820px;width:92vw;max-height:85vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+      <div>
+        <div style="font-weight:600;color:#e0e0e0">${esc(typeLabel)}</div>
+        <div class="muted" style="font-size:12px;margin-top:4px">${esc(modelLabel)} / ${esc(approach)}${promptHash ? ` <span class="badge" style="font-family:monospace">${esc(promptHash.slice(0,6))}</span>` : ''}</div>
+      </div>
+      <button onclick="this.closest('.disagreements-overlay').remove()" style="background:none;border:none;color:#aaa;cursor:pointer;font-size:18px;margin-left:16px;line-height:1">✕</button>
+    </div>
+    <div id="disagreements-body"><div class="empty">Loading…</div></div>
+  </div>`;
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+
+  try {
+    const params = new URLSearchParams({ model_label: modelLabel, approach, type, prompt_hash: promptHash });
+    const items = await api('GET', '/api/stats/disagreements?' + params);
+    const body = overlay.querySelector('#disagreements-body');
+    if (!items.length) {
+      body.innerHTML = '<div class="empty">No cases found.</div>';
+      return;
+    }
+    let html = `<div class="muted" style="font-size:12px;margin-bottom:10px">${items.length} case${items.length !== 1 ? 's' : ''}</div>`;
+    html += '<table class="stats-table" style="width:100%"><thead><tr>';
+    html += '<th>Student</th><th>Question</th><th>AI</th><th>TA</th><th></th>';
+    html += '</tr></thead><tbody>';
+    for (const it of items) {
+      html += `<tr>
+        <td>${esc(it.display_name)}</td>
+        <td>${esc(it.question)}</td>
+        <td>${chip(it.ai_result)}</td>
+        <td>${chip(it.ta_result)}</td>
+        <td><button class="btn btn-ghost btn-sm"
+          data-sk="${esc(it.student_key)}" data-q="${esc(it.question)}"
+          onclick="closeAndReview(this)">Review →</button></td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  } catch (e) {
+    const body = overlay.querySelector('#disagreements-body');
+    if (body) body.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function closeAndReview(btn) {
+  const sk = btn.dataset.sk;
+  const q = btn.dataset.q;
+  const overlay = btn.closest('.disagreements-overlay');
+  if (overlay) overlay.remove();
+  openReview(sk, q);
 }
 
 // ── Config modal ──────────────────────────────────────────────────────────────

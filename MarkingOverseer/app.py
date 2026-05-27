@@ -953,6 +953,83 @@ def api_attempts_detail():
     return jsonify(attempts[-500:])
 
 
+@app.route("/api/stats/disagreements")
+def api_stats_disagreements():
+    """Return individual cases where AI and TA disagree for a given model/approach/prompt group.
+
+    Query params:
+      model_label  — model label string (required)
+      approach     — ai_approach string (required)
+      prompt_hash  — prompt hash (empty string = match attempts with no hash)
+      type         — "fp" (AI=pass, TA=fail) or "fn" (AI=fail, TA=pass)
+    """
+    cfg = load_config()
+    dr = cfg.get("data_root", "")
+    if not dr:
+        return jsonify([])
+
+    model_label = request.args.get("model_label", "")
+    approach = request.args.get("approach", "")
+    prompt_hash_filter = request.args.get("prompt_hash")  # None = no filter; "" = match null hash
+    dtype = request.args.get("type", "fp")
+
+    attempts = store.read_attempts(dr)
+    records = store.get_all_records(dr)
+    students = store.read_students(dr)
+
+    def matches_group(a):
+        ml = a.get("model_label") or a.get("model") or "?"
+        if ml != model_label:
+            return False
+        if a.get("ai_approach", "?") != approach:
+            return False
+        if prompt_hash_filter is not None:
+            if (a.get("prompt_hash") or "") != prompt_hash_filter:
+                return False
+        return True
+
+    group_attempts = [
+        a for a in attempts
+        if matches_group(a) and not a.get("rejected") and a.get("result") in ("pass", "fail")
+    ]
+
+    # Per file_id keep the latest non-rejected attempt in this group
+    latest: dict[str, dict] = {}
+    for a in group_attempts:
+        fid = a["file_id"]
+        if fid not in latest or (a.get("timestamp", "") > latest[fid].get("timestamp", "")):
+            latest[fid] = a
+
+    results = []
+    for fid, a in latest.items():
+        rec = records.get(fid, {})
+        ta_mark = rec.get("human_mark_header")
+        if ta_mark not in ("pass", "fail"):
+            continue
+        ai_mark = a["result"]
+        is_fp = ai_mark == "pass" and ta_mark == "fail"
+        is_fn = ai_mark == "fail" and ta_mark == "pass"
+        if dtype == "fp" and not is_fp:
+            continue
+        if dtype == "fn" and not is_fn:
+            continue
+
+        student_info = mat.match_student(rec, students)
+        skey = mat.student_key(rec)
+        dname = mat.display_name(rec, student_info)
+        results.append({
+            "file_id": fid,
+            "question": rec.get("question", ""),
+            "student_key": skey,
+            "display_name": dname,
+            "ai_result": ai_mark,
+            "ta_result": ta_mark,
+        })
+
+    results.sort(key=lambda x: (x["question"], x["display_name"].lower()))
+    return jsonify(results)
+
+
 @app.route("/api/migrate/costs", methods=["POST"])
 def api_migrate_costs():
     """Recalculate cost_usd for attempts where it is 0 but tokens are known.
