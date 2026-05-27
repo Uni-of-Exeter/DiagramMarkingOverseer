@@ -303,19 +303,22 @@ function renderFileRecord(fr, studentKey, question) {
     bodyImgs += `<img class="pdf-img" style="margin-bottom:6px" src="${fr.body_image_url}?page=${pg}" alt="Student work page ${pg+1}"
       onerror="this.style.display='none'">`;
   }
+  const ansPageCount = fr.answer_page_count || 1;
+  let ansImgs = '';
+  if (fr.answer_image_url) {
+    for (let pg = 0; pg < ansPageCount; pg++) {
+      ansImgs += `<img class="pdf-img" style="margin-bottom:6px" src="${fr.answer_image_url}?page=${pg}" alt="Answer sheet page ${pg+1}"
+        onerror="this.style.display='none'">`;
+    }
+  }
   html += `<div class="review-grid" style="margin-bottom:14px">
     <div>
       <div class="muted" style="margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em">${pageCount > 1 ? `Student Work (${pageCount} pages)` : 'Student Work'}</div>
       ${bodyImgs}
     </div>
     <div>
-      <div class="muted" style="margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Answer Sheet</div>
-      ${fr.answer_image_url
-        ? `<img class="pdf-img" src="${fr.answer_image_url}" alt="Answer sheet"
-               onerror="this.style.display='none';this.nextSibling.style.display='block'">
-           <div style="display:none" class="empty">Answer PDF not found for this QID</div>`
-        : '<div class="empty">No QID extracted yet</div>'
-      }
+      <div class="muted" style="margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em">${ansPageCount > 1 ? `Answer Sheet (${ansPageCount} pages)` : 'Answer Sheet'}</div>
+      ${fr.answer_image_url ? ansImgs : '<div class="empty">No QID extracted yet</div>'}
     </div>
   </div>`;
 

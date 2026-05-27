@@ -404,9 +404,18 @@ def api_review(student_key, question):
                 body_page_count = scanner.pdf_page_count(body_path.read_bytes())
             except Exception:
                 pass
+        qid = r.get("QuestionID")
+        answer_page_count = 1
+        if qid:
+            answer_path = store.get_answer_pdf(dr, question, qid, cfg.get("answer_sheets_root", ""))
+            if answer_path:
+                try:
+                    answer_page_count = scanner.pdf_page_count(answer_path.read_bytes())
+                except Exception:
+                    pass
         detail.append({
             "file_id": fid,
-            "question_id": r.get("QuestionID"),
+            "question_id": qid,
             "human_mark_body": r.get("human_mark_body"),
             "human_mark_header": r.get("human_mark_header"),
             "human_mark_conflict": bool(
@@ -418,9 +427,9 @@ def api_review(student_key, question):
             "body_image_url": f"/pdf/body/{question}/{fid}/image",
             "body_page_count": body_page_count,
             "answer_image_url": (
-                f"/pdf/answer/{question}/{r['QuestionID']}/image"
-                if r.get("QuestionID") else None
+                f"/pdf/answer/{question}/{qid}/image" if qid else None
             ),
+            "answer_page_count": answer_page_count,
         })
 
     return jsonify({
@@ -511,8 +520,9 @@ def serve_header_image(question, file_id):
 def serve_answer_image(question, qid):
     cfg = load_config()
     dr = cfg.get("data_root", "")
+    page = int(request.args.get("page", 0))
     dpi = int(request.args.get("dpi", cfg.get("render_dpi", 150)))
-    return _serve_png(store.get_answer_pdf(dr, question, qid, cfg.get("answer_sheets_root", "")), 0, dpi)
+    return _serve_png(store.get_answer_pdf(dr, question, qid, cfg.get("answer_sheets_root", "")), page, dpi)
 
 
 # ── Routes: jobs ──────────────────────────────────────────────────────────────
