@@ -44,6 +44,7 @@ _PROMPT_DEFAULTS = {
     "twostep_extract": scanner._TWOSTEP_EXTRACT_PROMPT,
     "twostep_mark": scanner._TWOSTEP_MARK_PROMPT,
     "answer_sheet": scanner._ANSWER_SHEET_MARK_PROMPT,
+    "diagram": scanner._DIAGRAM_EXTRACT_PROMPT,
 }
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ _DEFAULTS: dict = {
     "data_root": os.environ.get("OVERSEER_DATA_ROOT", ""),
     "answer_sheets_root": "",
     "marked_scans_root": "",
+    "overseer_root": "",
     "aws_profile": "IncubatorDevOps",
     "aws_region": "eu-north-1",
     "anthropic_api_key": "",
@@ -87,6 +89,7 @@ _DEFAULTS: dict = {
     "parallel_workers": 4,
     "render_dpi": 150,
     "skip_existing": True,
+    "question_diagram_hints": {},
     "prompts": {
         "student_id": "",
         "header_mark": "",
@@ -96,9 +99,33 @@ _DEFAULTS: dict = {
         "twostep_extract": "",
         "twostep_mark": "",
         "answer_sheet": "",
+        "diagram": "",
     },
     "prompt_history": {},
 }
+
+
+_default_overseer_root_cache: str | None = None
+
+
+def _default_overseer_root() -> str:
+    """Detect git repo root and return its parent / MarkingOverseer as the default store path."""
+    global _default_overseer_root_cache
+    if _default_overseer_root_cache is None:
+        try:
+            r = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True,
+                cwd=str(Path(__file__).parent), timeout=5,
+            )
+            if r.returncode == 0:
+                git_root = r.stdout.strip()
+                _default_overseer_root_cache = str(Path(git_root).parent / "MarkingOverseer")
+            else:
+                _default_overseer_root_cache = ""
+        except Exception:
+            _default_overseer_root_cache = ""
+    return _default_overseer_root_cache
 
 
 def load_config() -> dict:
@@ -108,10 +135,17 @@ def load_config() -> dict:
             cfg = {**_DEFAULTS, **saved}
             cfg["prompts"] = {**_DEFAULTS["prompts"], **saved.get("prompts", {})}
             cfg["prompt_history"] = saved.get("prompt_history", {})
-            return cfg
+            cfg["question_diagram_hints"] = saved.get("question_diagram_hints", {})
         except Exception:
-            pass
-    return {**_DEFAULTS, "prompts": dict(_DEFAULTS["prompts"]), "prompt_history": {}}
+            cfg = {**_DEFAULTS, "prompts": dict(_DEFAULTS["prompts"]),
+                   "prompt_history": {}, "question_diagram_hints": {}}
+    else:
+        cfg = {**_DEFAULTS, "prompts": dict(_DEFAULTS["prompts"]),
+               "prompt_history": {}, "question_diagram_hints": {}}
+
+    overseer_root = (cfg.get("overseer_root") or "").strip() or _default_overseer_root()
+    store.configure_overseer_root(overseer_root)
+    return cfg
 
 
 def save_config(cfg: dict) -> None:
@@ -222,6 +256,8 @@ def api_save_config():
     if data.get("anthropic_api_key") == "***":
         data["anthropic_api_key"] = cfg.get("anthropic_api_key", "")
     cfg.update(data)
+    if "question_diagram_hints" in data:
+        cfg["question_diagram_hints"] = data["question_diagram_hints"]
     history = cfg.get("prompt_history", {})
     for key, text in data.get("prompts", {}).items():
         effective = text or _PROMPT_DEFAULTS.get(key, "")
@@ -251,6 +287,7 @@ def api_prompt_defaults():
         "twostep_extract": scanner._TWOSTEP_EXTRACT_PROMPT,
         "twostep_mark": scanner._TWOSTEP_MARK_PROMPT,
         "answer_sheet": scanner._ANSWER_SHEET_MARK_PROMPT,
+        "diagram": scanner._DIAGRAM_EXTRACT_PROMPT,
     })
 
 
@@ -806,6 +843,8 @@ def api_ai_mark():
             t = _eff("twostep_extract") + "|" + _eff("twostep_mark")
         elif ap == "answer_sheet":
             t = _eff("answer_sheet")
+        elif ap in ("diagram", "diagram_hints"):
+            t = _eff("diagram")
         else:
             t = ""
         approach_prompt_hashes[ap] = _prompt_hash(t) if t else None
@@ -822,6 +861,8 @@ def api_ai_mark():
                 _records_to_add = [("twostep_extract", _eff("twostep_extract")), ("twostep_mark", _eff("twostep_mark"))]
             elif ap == "answer_sheet":
                 _records_to_add = [("answer_sheet", _eff("answer_sheet"))]
+            elif ap in ("diagram", "diagram_hints"):
+                _records_to_add = [("diagram", _eff("diagram"))]
             else:
                 _records_to_add = []
             for _key, _text in _records_to_add:
@@ -890,6 +931,16 @@ def api_ai_mark():
                     answer_path.read_bytes(), body_bytes, **kwargs,
                     prompt=prompts.get("answer_sheet") or None,
                 )
+            elif approach in ("diagram", "diagram_hints"):
+                base_prompt = prompts.get("diagram") or None
+                if approach == "diagram_hints":
+                    hints = cfg.get("question_diagram_hints", {}).get(question, "")
+                    if hints:
+                        base = base_prompt or scanner._DIAGRAM_EXTRACT_PROMPT
+                        base_prompt = (
+                            base + "\n\nHere is an example Mermaid diagram for this question:\n" + hints
+                        )
+                result = scanner.ai_mark_diagram(body_bytes, **kwargs, prompt=base_prompt)
             else:
                 raise ValueError(f"Unknown approach: {approach!r}")
 
@@ -903,6 +954,8 @@ def api_ai_mark():
                 "latency_ms": result["latency_ms"],
                 "cost_usd": mat.cost_estimate(mc["model"], result["input_tokens"], result["output_tokens"]),
             })
+            if result.get("diagram_data"):
+                attempt["diagram_data"] = result["diagram_data"]
             _job_log(jid, f"  {fid} [{approach}/{mc.get('label', mc['model'])}]: {result['result']}")
             if result["result"] == "error":
                 snippet = (result.get("raw_response") or "")[:200].replace("\n", " ")
@@ -946,11 +999,21 @@ def api_attempts_detail():
     if not dr:
         return jsonify([])
     attempts = store.read_attempts(dr)
+    records = store.get_all_records(dr)
+    students = store.read_students(dr)
     for f in ("question", "ai_approach", "model"):
         v = request.args.get(f)
         if v:
             attempts = [a for a in attempts if a.get(f) == v]
-    return jsonify(attempts[-500:])
+    result = []
+    for a in attempts[-500:]:
+        rec = records.get(a.get("file_id", ""), {})
+        student_info = mat.match_student(rec, students)
+        enriched = dict(a)
+        enriched["student_key"] = mat.student_key(rec)
+        enriched["display_name"] = mat.display_name(rec, student_info)
+        result.append(enriched)
+    return jsonify(result)
 
 
 @app.route("/api/stats/disagreements")
@@ -1076,6 +1139,8 @@ def api_migrate_prompt_hashes():
             _PROMPT_DEFAULTS["twostep_extract"] + "|" + _PROMPT_DEFAULTS["twostep_mark"]
         ),
         "answer_sheet": _prompt_hash(_PROMPT_DEFAULTS["answer_sheet"]),
+        "diagram": _prompt_hash(_PROMPT_DEFAULTS["diagram"]),
+        "diagram_hints": _prompt_hash(_PROMPT_DEFAULTS["diagram"]),
     }
 
     history = cfg.get("prompt_history", {})
@@ -1086,6 +1151,8 @@ def api_migrate_prompt_hashes():
             ("twostep_mark", _PROMPT_DEFAULTS["twostep_mark"]),
         ],
         "answer_sheet": [("answer_sheet", _PROMPT_DEFAULTS["answer_sheet"])],
+        "diagram": [("diagram", _PROMPT_DEFAULTS["diagram"])],
+        "diagram_hints": [("diagram", _PROMPT_DEFAULTS["diagram"])],
     }
     for ap, recs in default_prompt_map.items():
         for key, text in recs:

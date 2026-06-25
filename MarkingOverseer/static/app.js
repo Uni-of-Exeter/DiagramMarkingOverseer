@@ -10,6 +10,9 @@ let state = {
   reviewStudent: null, // student_key string
   reviewQuestion: null,
   reviewData: null,    // api response
+  reviewFilter: null,  // {items: [{student_key, question}], label} or null
+  reviewFilterIdx: 0,
+  reviewFocusAttempt: null, // attempt_id to scroll to after next render
   config: null,
   questions: window.INIT ? window.INIT.questions : [],
   markingModels: [],   // [{provider, model, label, enabled}]
@@ -157,11 +160,18 @@ function renderMatrix(data) {
 // ── Review view ───────────────────────────────────────────────────────────────
 
 function openReview(studentKey, question) {
+  if (state.reviewFilter) {
+    const idx = state.reviewFilter.items.findIndex(
+      it => it.student_key === studentKey && it.question === question
+    );
+    if (idx >= 0) state.reviewFilterIdx = idx;
+  }
   state.reviewStudent = studentKey;
   state.reviewQuestion = question;
   showView('review');
   populateReviewSelects(studentKey, question);
   loadReview(studentKey, question);
+  renderFilteredReviewNav();
 }
 
 function populateReviewSelects(activeKey, activeQ) {
@@ -212,6 +222,19 @@ async function loadReview(studentKey, question) {
     const data = await api('GET', `/api/review/${encodeURIComponent(studentKey)}/${question}`);
     state.reviewData = data;
     renderReview(data, studentKey, question);
+
+    if (state.reviewFocusAttempt) {
+      const target = document.getElementById('attempt-' + state.reviewFocusAttempt);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.style.outline = '2px solid #7ecfff';
+        target.style.transition = 'outline .5s';
+        setTimeout(() => { target.style.outline = ''; }, 3000);
+      }
+      state.reviewFocusAttempt = null;
+    }
+
+    renderPendingMermaid();
   } catch (e) {
     body.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
   }
@@ -339,7 +362,7 @@ function renderFileRecord(fr, studentKey, question) {
 function renderAttempt(a) {
   const rejected = a.rejected;
   const borderColor = rejected ? '#3a1a1a' : (a.result === 'pass' ? '#1a3a2a' : a.result === 'fail' ? '#3a1a1a' : '#2a2a3e');
-  let html = `<div class="attempt-row" style="border-color:${borderColor};${rejected ? 'opacity:.5' : ''}">
+  let html = `<div class="attempt-row" id="attempt-${esc(a.attempt_id || '')}" style="border-color:${borderColor};${rejected ? 'opacity:.5' : ''}">
     <div class="attempt-header">
       ${a.result ? chip(a.result) : '<span class="muted">—</span>'}
       <span class="attempt-label">${esc(a.model_label || a.model)}</span>
@@ -357,8 +380,27 @@ function renderAttempt(a) {
     html += `<div class="reasoning">${esc(a.reasoning)}</div>`;
   }
   if (a.step1_result) {
-    html += `<div class="muted text-sm" style="margin-top:8px">Extracted answer (step 1):</div>
+    const label = (a.ai_approach === 'diagram' || a.ai_approach === 'diagram_hints')
+      ? 'Extracted diagrams (Mermaid):'
+      : 'Extracted answer (step 1):';
+    html += `<div class="muted text-sm" style="margin-top:8px">${label}</div>
       <div class="step1-box">${esc(a.step1_result)}</div>`;
+  }
+  if ((a.ai_approach === 'diagram' || a.ai_approach === 'diagram_hints') && a.diagram_data) {
+    let dd;
+    try { dd = typeof a.diagram_data === 'string' ? JSON.parse(a.diagram_data) : a.diagram_data; }
+    catch (_) { dd = null; }
+    if (dd && Array.isArray(dd.diagrams) && dd.diagrams.length) {
+      html += `<div style="margin-top:10px"><div class="muted text-sm" style="margin-bottom:6px">Rendered diagrams:</div>`;
+      for (const d of dd.diagrams) {
+        html += `<div style="margin-bottom:10px">
+          <div class="muted" style="font-size:11px;margin-bottom:4px">${esc(d.label || 'Diagram')}</div>
+          <div class="mermaid-pending" data-mermaid="${esc(d.mermaid || '')}"
+            style="background:#1a1a28;border-radius:4px;padding:8px;min-height:40px;color:#666;font-size:12px">Rendering…</div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
   }
   if (a.error) {
     html += `<div class="reasoning" style="color:#ff6b6b">Error: ${esc(a.error)}</div>`;
@@ -505,6 +547,8 @@ async function runAiMark() {
   if (document.getElementById('a-oneshot').checked) approaches.push('oneshot');
   if (document.getElementById('a-twostep').checked) approaches.push('twostep');
   if (document.getElementById('a-answer_sheet').checked) approaches.push('answer_sheet');
+  if (document.getElementById('a-diagram').checked) approaches.push('diagram');
+  if (document.getElementById('a-diagram_hints').checked) approaches.push('diagram_hints');
   if (!approaches.length) { alert('Select at least one approach.'); return; }
 
   const selectedModels = (state.markingModels || [])
@@ -743,11 +787,15 @@ function _renderAttemptDetailTable(el) {
     if (expanded) {
       html += `<tr><td colspan="10" style="padding:0">
         <div style="background:#0f0f1a;border-left:3px solid #7ecfff;padding:14px 16px;font-size:12px">
-        <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:10px;color:#888">
+        <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:10px;color:#888;align-items:center">
           <span>ID: <code style="color:#aaa">${esc(a.attempt_id || '—')}</code></span>
           <span>${a.input_tokens || 0} in + ${a.output_tokens || 0} out tokens</span>
           ${a.prompt_hash ? `<span>Prompt: <span class="badge" style="cursor:pointer;font-family:monospace" onclick="event.stopPropagation();showPromptPopup('${esc(a.prompt_hash)}')">${esc(a.prompt_hash.slice(0,6))}</span></span>` : ''}
           ${a.rejected ? '<span style="color:#ff6b6b">REJECTED</span>' : ''}
+          ${a.display_name ? `<span>Student: <span style="color:#e0e0e0">${esc(a.display_name)}</span></span>` : ''}
+          ${a.student_key ? `<button class="btn btn-ghost btn-sm" style="padding:3px 8px"
+            data-sk="${esc(a.student_key)}" data-q="${esc(a.question || '')}" data-aid="${esc(a.attempt_id || '')}"
+            onclick="event.stopPropagation();reviewAttemptDirect(this)">Review →</button>` : ''}
         </div>`;
       if (a.error) {
         html += `<div style="color:#ff6b6b;margin-bottom:8px">Error: ${esc(a.error)}</div>`;
@@ -831,7 +879,11 @@ async function showDisagreements(btn) {
       body.innerHTML = '<div class="empty">No cases found.</div>';
       return;
     }
-    let html = `<div class="muted" style="font-size:12px;margin-bottom:10px">${items.length} case${items.length !== 1 ? 's' : ''}</div>`;
+    let html = `<div class="row" style="margin-bottom:10px;align-items:center">
+      <span class="muted" style="font-size:12px">${items.length} case${items.length !== 1 ? 's' : ''}</span>
+      <div class="spacer"></div>
+      <button class="btn btn-primary btn-sm" id="review-all-btn">Review all →</button>
+    </div>`;
     html += '<table class="stats-table" style="width:100%"><thead><tr>';
     html += '<th>Student</th><th>Question</th><th>AI</th><th>TA</th><th></th>';
     html += '</tr></thead><tbody>';
@@ -848,6 +900,13 @@ async function showDisagreements(btn) {
     }
     html += '</tbody></table>';
     body.innerHTML = html;
+    const reviewAllBtn = body.querySelector('#review-all-btn');
+    if (reviewAllBtn) {
+      reviewAllBtn.addEventListener('click', () => {
+        overlay.remove();
+        startFilteredReview(items, typeLabel);
+      });
+    }
   } catch (e) {
     const body = overlay.querySelector('#disagreements-body');
     if (body) body.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
@@ -860,6 +919,85 @@ function closeAndReview(btn) {
   const overlay = btn.closest('.disagreements-overlay');
   if (overlay) overlay.remove();
   openReview(sk, q);
+}
+
+// ── Review filter (filtered review from disagreements) ────────────────────────
+
+function renderFilteredReviewNav() {
+  const banner = document.getElementById('review-filter-banner');
+  if (!banner) return;
+  if (!state.reviewFilter) {
+    banner.style.display = 'none';
+    return;
+  }
+  const { items, label } = state.reviewFilter;
+  const idx = state.reviewFilterIdx;
+  banner.style.display = 'flex';
+  const labelEl = document.getElementById('review-filter-label');
+  const posEl = document.getElementById('review-filter-pos');
+  if (labelEl) labelEl.textContent = label;
+  if (posEl) posEl.textContent = `${idx + 1} / ${items.length}`;
+}
+
+function reviewFilterPrev() {
+  if (!state.reviewFilter) return;
+  const items = state.reviewFilter.items;
+  state.reviewFilterIdx = (state.reviewFilterIdx - 1 + items.length) % items.length;
+  const it = items[state.reviewFilterIdx];
+  openReview(it.student_key, it.question);
+}
+
+function reviewFilterNext() {
+  if (!state.reviewFilter) return;
+  const items = state.reviewFilter.items;
+  state.reviewFilterIdx = (state.reviewFilterIdx + 1) % items.length;
+  const it = items[state.reviewFilterIdx];
+  openReview(it.student_key, it.question);
+}
+
+function clearReviewFilter() {
+  state.reviewFilter = null;
+  state.reviewFilterIdx = 0;
+  renderFilteredReviewNav();
+}
+
+function startFilteredReview(items, label) {
+  state.reviewFilter = {
+    items: items.map(it => ({ student_key: it.student_key, question: it.question })),
+    label,
+  };
+  state.reviewFilterIdx = 0;
+  const first = state.reviewFilter.items[0];
+  if (first) openReview(first.student_key, first.question);
+}
+
+function reviewAttemptDirect(btn) {
+  const sk = btn.dataset.sk;
+  const q = btn.dataset.q;
+  const aid = btn.dataset.aid;
+  state.reviewFocusAttempt = aid || null;
+  openReview(sk, q);
+}
+
+// ── Mermaid rendering ─────────────────────────────────────────────────────────
+
+async function renderPendingMermaid() {
+  if (typeof mermaid === 'undefined') return;
+  const nodes = document.querySelectorAll('.mermaid-pending[data-mermaid]');
+  for (const node of nodes) {
+    const code = node.dataset.mermaid;
+    if (!code) continue;
+    node.classList.remove('mermaid-pending');
+    try {
+      const id = 'mmd-' + Math.random().toString(36).slice(2, 10);
+      const { svg } = await mermaid.render(id, code);
+      node.innerHTML = svg;
+    } catch (e) {
+      node.style.color = '#ff6b6b';
+      node.style.fontSize = '11px';
+      node.textContent = 'Diagram render error: ' + (e.message || e);
+    }
+  }
 }
 
 // ── Config modal ──────────────────────────────────────────────────────────────
@@ -875,6 +1013,16 @@ async function openConfig() {
     document.getElementById('cfg-data-root').value = cfg.data_root || '';
     document.getElementById('cfg-answer-sheets-root').value = cfg.answer_sheets_root || '';
     document.getElementById('cfg-marked-scans-root').value = cfg.marked_scans_root || '';
+    const orEl = document.getElementById('cfg-overseer-root');
+    if (orEl) {
+      orEl.value = cfg.overseer_root || '';
+      const hint = document.getElementById('cfg-overseer-root-hint');
+      if (hint) {
+        hint.textContent = cfg.overseer_root
+          ? `Using: ${cfg.overseer_root}`
+          : 'Auto-detect from git repo (leave blank to use default)';
+      }
+    }
     document.getElementById('cfg-aws-profile').value = cfg.aws_profile || '';
     document.getElementById('cfg-aws-region').value = cfg.aws_region || '';
     document.getElementById('cfg-anthropic-key').value = cfg.anthropic_api_key || '';
@@ -893,6 +1041,15 @@ async function openConfig() {
     document.getElementById('cfg-prompt-twostep-extract').value = p.twostep_extract || defs.twostep_extract || '';
     document.getElementById('cfg-prompt-twostep-mark').value = p.twostep_mark || defs.twostep_mark || '';
     document.getElementById('cfg-prompt-answer-sheet').value = p.answer_sheet || defs.answer_sheet || '';
+    const diagramPromptEl = document.getElementById('cfg-prompt-diagram');
+    if (diagramPromptEl) diagramPromptEl.value = p.diagram || defs.diagram || '';
+    const hintsEl = document.getElementById('cfg-diagram-hints');
+    if (hintsEl) {
+      const hints = cfg.question_diagram_hints || {};
+      hintsEl.value = Object.keys(hints).length
+        ? JSON.stringify(hints, null, 2)
+        : '';
+    }
     document.getElementById('config-modal').classList.add('open');
     loadLogs();
   } catch (e) {
@@ -960,10 +1117,18 @@ function _promptVal(id, defaultKey) {
 }
 
 async function saveConfig() {
+  let questionDiagramHints = {};
+  const hintsEl = document.getElementById('cfg-diagram-hints');
+  if (hintsEl && hintsEl.value.trim()) {
+    try { questionDiagramHints = JSON.parse(hintsEl.value.trim()); }
+    catch (_) { alert('Per-question Mermaid hints must be valid JSON.'); return; }
+  }
   const cfg = {
     data_root: document.getElementById('cfg-data-root').value.trim(),
     answer_sheets_root: document.getElementById('cfg-answer-sheets-root').value.trim(),
     marked_scans_root: document.getElementById('cfg-marked-scans-root').value.trim(),
+    overseer_root: document.getElementById('cfg-overseer-root')?.value.trim() || '',
+    question_diagram_hints: questionDiagramHints,
     aws_profile: document.getElementById('cfg-aws-profile').value.trim(),
     aws_region: document.getElementById('cfg-aws-region').value.trim(),
     anthropic_api_key: document.getElementById('cfg-anthropic-key').value.trim() || '***',
@@ -982,6 +1147,7 @@ async function saveConfig() {
       twostep_extract: _promptVal('cfg-prompt-twostep-extract', 'twostep_extract'),
       twostep_mark: _promptVal('cfg-prompt-twostep-mark', 'twostep_mark'),
       answer_sheet: _promptVal('cfg-prompt-answer-sheet', 'answer_sheet'),
+      diagram: _promptVal('cfg-prompt-diagram', 'diagram'),
     },
   };
   try {
@@ -1106,6 +1272,10 @@ function esc(str) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 (async function init() {
+  if (typeof mermaid !== 'undefined') {
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+  }
+
   try {
     const [qs, cfg] = await Promise.all([
       api('GET', '/api/config/questions'),

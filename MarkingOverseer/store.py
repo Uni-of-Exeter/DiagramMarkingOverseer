@@ -159,10 +159,28 @@ def list_questions(data_root: str) -> list[str]:
     )
 
 
+# ── Configurable overseer root ────────────────────────────────────────────────
+# Attempts, overrides, and student data live under _overseer_base(data_root).
+# Call configure_overseer_root() once at startup to redirect them.
+
+_overseer_root_override: str = ""
+
+
+def configure_overseer_root(path: str) -> None:
+    global _overseer_root_override
+    _overseer_root_override = path
+
+
+def _overseer_base(data_root: str) -> Path:
+    if _overseer_root_override:
+        return Path(_overseer_root_override)
+    return Path(data_root) / "MarkingOverseer"
+
+
 # ── Attempts ──────────────────────────────────────────────────────────────────
 
 def _attempts_path(data_root: str) -> Path:
-    return Path(data_root) / "MarkingOverseer" / "attempts.json"
+    return _overseer_base(data_root) / "attempts.json"
 
 
 def read_attempts(data_root: str) -> list[dict]:
@@ -192,7 +210,7 @@ def update_attempt(data_root: str, attempt_id: str, fields: dict) -> bool:
 # ── Overrides ─────────────────────────────────────────────────────────────────
 
 def _overrides_path(data_root: str) -> Path:
-    return Path(data_root) / "MarkingOverseer" / "overrides.json"
+    return _overseer_base(data_root) / "overrides.json"
 
 
 def read_overrides(data_root: str) -> dict:
@@ -216,7 +234,7 @@ def write_override(data_root: str, student_key: str, question: str, value: str |
 # ── Students ──────────────────────────────────────────────────────────────────
 
 def _students_path(data_root: str) -> Path:
-    return Path(data_root) / "MarkingOverseer" / "students.json"
+    return _overseer_base(data_root) / "students.json"
 
 
 def read_students(data_root: str) -> list[dict]:

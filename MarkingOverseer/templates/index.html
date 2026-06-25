@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Marking Overseer</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f0f1a;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column}
@@ -159,6 +160,13 @@ table.matrix tr:hover td{background:#161625}
         <button class="btn btn-ghost btn-sm" onclick="showView('matrix')">← Back</button>
         <h2 style="font-size:18px;font-weight:700" id="review-title">Review</h2>
       </div>
+      <div id="review-filter-banner" style="display:none;margin-bottom:10px;padding:8px 12px;background:#1e1e30;border-radius:8px;border:1px solid #3a3a52;display:none;align-items:center;gap:8px;flex-wrap:wrap">
+        <span id="review-filter-label" class="text-sm" style="color:#fcc419;flex:1"></span>
+        <button class="btn btn-ghost btn-sm" onclick="reviewFilterPrev()">← Prev</button>
+        <span id="review-filter-pos" class="muted text-sm"></span>
+        <button class="btn btn-ghost btn-sm" onclick="reviewFilterNext()">Next →</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearReviewFilter()">✕ Clear filter</button>
+      </div>
       <div class="row" style="margin-bottom:16px;gap:8px">
         <div class="field mb-0" style="flex:1;max-width:300px">
           <select class="input" id="review-student-select" onchange="onStudentSelect()">
@@ -252,6 +260,8 @@ table.matrix tr:hover td{background:#161625}
               <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="a-oneshot" checked> <span class="text-sm">One-shot</span></label>
               <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="a-twostep"> <span class="text-sm">Two-step</span></label>
               <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="a-answer_sheet"> <span class="text-sm">Answer-sheet</span></label>
+              <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="a-diagram"> <span class="text-sm">Diagram</span></label>
+              <label class="row" style="gap:4px;cursor:pointer"><input type="checkbox" id="a-diagram_hints"> <span class="text-sm">Diagram+Hints</span></label>
             </div>
           </div>
         </div>
@@ -308,6 +318,8 @@ table.matrix tr:hover td{background:#161625}
             <option value="oneshot">One-shot</option>
             <option value="twostep">Two-step</option>
             <option value="answer_sheet">Answer-sheet</option>
+            <option value="diagram">Diagram</option>
+            <option value="diagram_hints">Diagram+Hints</option>
           </select>
         </div>
         <div id="stats-detail"><div class="empty">No attempts yet.</div></div>
@@ -360,6 +372,11 @@ table.matrix tr:hover td{background:#161625}
     <div class="field">
       <label>Marked Scans Root (optional — same structure as Data Root but with TA marks visible)</label>
       <input class="input" id="cfg-marked-scans-root" placeholder="/path/to/marked-scans">
+    </div>
+    <div class="field">
+      <label>Overseer Data Root (for attempts, overrides, students — default: git repo parent/MarkingOverseer)</label>
+      <input class="input" id="cfg-overseer-root" placeholder="leave blank to auto-detect">
+      <div class="muted" style="font-size:11px;margin-top:4px" id="cfg-overseer-root-hint"></div>
     </div>
 
     <hr class="divider">
@@ -454,6 +471,17 @@ table.matrix tr:hover td{background:#161625}
         <div class="field">
           <label>Answer-sheet: mark student work (receives answer PDF + student worksheet)</label>
           <textarea class="input" id="cfg-prompt-answer-sheet" rows="4" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <div class="field">
+          <label>Diagram extraction (base prompt for both Diagram and Diagram+Hints approaches)</label>
+          <textarea class="input" id="cfg-prompt-diagram" rows="5" style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+        </div>
+        <hr class="divider">
+        <div class="field">
+          <label>Per-question Mermaid hints for Diagram+Hints approach
+            <span class="muted">(JSON: <code>{"Question1": "graph LR\n  A--&gt;B", ...}</code>)</span>
+          </label>
+          <textarea class="input" id="cfg-diagram-hints" rows="5" style="resize:vertical;font-family:monospace;font-size:12px" placeholder='{"Question1": "graph LR\n  A -->|f| B"}'></textarea>
         </div>
       </div>
     </details>

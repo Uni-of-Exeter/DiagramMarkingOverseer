@@ -560,6 +560,89 @@ def ai_mark_twostep(
     }
 
 
+_DIAGRAM_EXTRACT_PROMPT = (
+    "In the given student work scan, identify what each question is asking. "
+    "Isolate the final answer to each question, and convert any diagram to Mermaid format.\n\n"
+    "Return a JSON object with exactly these fields:\n"
+    "- \"valid\": true if the overall work appears mathematically correct, false otherwise\n"
+    "- \"diagrams\": a list of objects, each with:\n"
+    "  - \"label\": a short description of what this diagram represents\n"
+    "  - \"mermaid\": the diagram in Mermaid graph syntax\n\n"
+    "Example Mermaid format:\n"
+    "graph LR\n"
+    "  A -->|f| B[\"x^2 + 2x - 4\"]\n"
+    "  A --> R1[\"|R^6|\"]\n"
+    "  B --> R2[\"|R^6|\"]\n"
+    "  R1 -->|\"a b c\\nd e f\\ng h i\"| R2\n\n"
+    "Return only valid JSON — no surrounding text or markdown fences."
+)
+
+
+def _parse_diagram_json(text: str) -> dict:
+    """Parse diagram extraction response into {valid, diagrams} dict."""
+    clean = re.sub(r"```(?:json)?\s*|\s*```", "", text)
+    blocks: list[str] = []
+    for m in re.finditer(r"\{", clean):
+        start, depth = m.start(), 0
+        for j, c in enumerate(clean[start:]):
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    blocks.append(clean[start : start + j + 1])
+                    break
+    for block in reversed(blocks):
+        try:
+            data = json.loads(block)
+            if "valid" in data:
+                return data
+        except json.JSONDecodeError:
+            continue
+    logger.warning("Cannot parse diagram JSON from AI response: %r", text[:500])
+    return {"valid": None, "diagrams": []}
+
+
+def ai_mark_diagram(
+    body_pdf_bytes: bytes,    # WORK ZONE: student work only
+    provider: str,
+    model: str,
+    aws_profile: str | None = None,
+    aws_region: str = "eu-north-1",
+    anthropic_api_key: str | None = None,
+    prompt: str | None = None,
+) -> dict:
+    """Extract diagrams from student work and determine overall validity.
+
+    WORK ZONE — only receives body PDF bytes, never student identity.
+    The prompt may include per-question Mermaid examples for diagram_hints approach.
+    """
+    resp = _call(
+        messages=[{"role": "user", "content": [_pdf(body_pdf_bytes), _txt(prompt or _DIAGRAM_EXTRACT_PROMPT)]}],
+        max_tokens=4096,
+        provider=provider, model=model,
+        aws_profile=aws_profile, aws_region=aws_region, anthropic_api_key=anthropic_api_key,
+    )
+    diagram_data = _parse_diagram_json(resp["text"])
+    valid = diagram_data.get("valid")
+    result = "pass" if valid is True else "fail" if valid is False else "error"
+    diagrams = diagram_data.get("diagrams", [])
+    step1_result = "\n\n".join(
+        f"[{d.get('label', 'Diagram')}]\n{d.get('mermaid', '')}"
+        for d in diagrams
+    ) if diagrams else None
+    return {
+        "result": result,
+        "reasoning": f"{len(diagrams)} diagram(s) extracted, valid={valid}",
+        "raw_response": resp["text"],
+        "step1_result": step1_result,
+        "diagram_data": diagram_data,
+        "input_tokens": resp["input_tokens"],
+        "output_tokens": resp["output_tokens"],
+        "latency_ms": resp["latency_ms"],
+    }
+
+
 def ai_mark_answer_sheet(
     answer_pdf_bytes: bytes,  # WORK ZONE: answer sheet PDF (looked up by QID)
     body_pdf_bytes: bytes,    # WORK ZONE: student work only
